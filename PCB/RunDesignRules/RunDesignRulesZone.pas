@@ -7,6 +7,9 @@
 Author: BL Miller
 19/08/2019 : first cut POC
 20/08/2019 : implemented choose rectange & got DRCmarkers to display.
+21/08/2019 : binary rule loop iterating was creating duplicate violations.
+
+tbd: problems with violation descriptions
 }
 
 const
@@ -137,6 +140,7 @@ var
     RulesList  : TObjectList;
     Primitives : TObjectList;
     Violation  : IPCB_Violation;
+    ViolDesc   : WideString;
 //    BR         : TCoordRect;
     I, J, K    : integer;
 
@@ -179,6 +183,7 @@ begin
     Rpt.Add('');
     Rpt.Add('Cleared existing DRC markers');
     Rpt.Add('');
+    Rpt.Add('   prim1:    prim2:       Violation Name:         Desc.:                  RuleName:     RuleType: ');
 
     for K := 0 to (RulesList.Count - 1) do
     begin
@@ -195,37 +200,37 @@ begin
                 if Violation <> nil then
                 begin
                     Board.AddPCBObject(Violation);
-                    Rpt.Add('prim1 : ' + Prim1.ObjectIDString + '  Violation Name: ' + Violation.Name + ' Desc. : '
-                            + Violation.Description + '  Rule Name : ' + Rule.Name + '  RuleType : ' + RuleKindToString(Rule.RuleKind));
+                    ViolDesc := Violation.Description;
+                    //Setlength(ViolDesc,40);
+                    Rpt.Add('U  ' + PadRight(Prim1.ObjectIDString, 10) + '            ' + PadRight(Violation.Name, 20) + ' '
+                            + ViolDesc + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
 
                     Prim1.SetState_DRCError(true);
                     Prim1.GraphicallyInvalidate;
                 end;
             end;
 
-            for J := 0 to (Primitives.Count - 1) do
+            for J := (I + 1) to (Primitives.Count - 1) do
             begin
                 Prim2 := Primitives.Items(J);
-                if Prim2 <> Prim1 then
+                //Rule := Board.FindDominantRuleForObjectPair(Prim1, Prim2, RuleKind);
+                if (not Rule.IsUnary) and Rule.Enabled then
                 begin
-                    //Rule := Board.FindDominantRuleForObjectPair(Prim1, Prim2, RuleKind);
-                    if (not Rule.IsUnary) and Rule.Enabled then
+//                  Rule.CheckBinaryScope(Prim1, Prim2);
+//                  Rule.Scope2Includes(Prim2);
+                // Violation := PCBServer.PCBObjectFactory(eViolationObject, eNoDimension, eCreate_Default);
+                    Violation := Rule.ActualCheck(Prim1, Prim2);
+                    if Violation <> nil then
                     begin
-//                      Rule.CheckBinaryScope(Prim1, Prim2);
-//                      Rule.Scope2Includes(Prim2);
-                    //Violation := PCBServer.PCBObjectFactory(eViolationObject, eNoDimension, eCreate_Default);
-                        Violation := Rule.ActualCheck(Prim1, Prim2);
-                        if Violation <> nil then
-                        begin
-                            Board.AddPCBObject(Violation);
-                            Rpt.Add('prim1 : ' + Prim1.ObjectIDString + '  prim2 : ' + Prim2.ObjectIDString
-                                    + '  Violation Name : ' + Violation.Name + ' Desc. : ' + Violation.Description
-                                    + '  Rule Name : ' + Rule.Name + '  RuleType : ' + RuleKindToString(Rule.RuleKind));
-                            Prim1.SetState_DRCError(true);
-                            Prim2.SetState_DRCError(true);
-                            Prim1.GraphicallyInvalidate;
-                            Prim2.GraphicallyInvalidate;
-                        end;
+                        Board.AddPCBObject(Violation);
+                        ViolDesc := Violation.Description;
+                        //SetLength(ViolDesc,40);
+                        Rpt.Add('B  '+ PadRight(Prim1.ObjectIDString, 10) + ' ' + PadRight(Prim2.ObjectIDString, 10) + ' ' + PadRight(Violation.Name, 20)
+                                + ' ' + ViolDesc + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
+                        Prim1.SetState_DRCError(true);
+                        Prim2.SetState_DRCError(true);
+                        Prim1.GraphicallyInvalidate;
+                        Prim2.GraphicallyInvalidate;
                     end;
                 end;
             end;  // J
@@ -244,17 +249,16 @@ begin
     Rpt.Insert(2,'');
 
     // Display the Rules report
-    FileName := ChangeFileExt(Board.FileName + '-ObjViolationReport','.txt');
+    FileName := ExtractFilePath(Board.FileName) + ChangefileExt(ExtractFileName(Board.FileName),'') + '-ObjViolateReport.txt';
     Rpt.SaveToFile(Filename);
     Rpt.Free;
-    
+
     Document  := Client.OpenDocument('Text', FileName);
     if Document <> Nil Then
     begin
-        if (Document.GetIsShown =longBool) then
-            Document.DoFileLoad
-        else
-            Client.ShowDocument(Document);
+        Client.ShowDocument(Document);
+        if (Document.GetIsShown <> 0 ) then
+            Document.DoFileLoad;
     end;
 end;
 
@@ -286,8 +290,10 @@ begin
     Prim1 := nil;
 
     if Board.GetState_SelectecObjectCount > 0 then
-        Prim1 := Board.SelectecObject(1);
-    if not InSet(Prim1, SetObjects) then Prim1 := nil;
+        Prim1 := Board.SelectecObject(0);
+        x := Prim1.X;
+        y := prim1.Y;
+    if not InSet(Prim1.ObjectId, SetObjects) then Prim1 := nil;
 
     msg := 'Select Object for Rules Checking';
     While not (Prim1 <> Nil) do
