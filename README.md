@@ -1,2 +1,2 @@
-# Altium-DephiScripts
-Scripts for Altium Designer.
+# Altium-DelphiScripts
+Scripts for Altium Designer 17/18.
