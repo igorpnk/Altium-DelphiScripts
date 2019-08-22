@@ -1,5 +1,5 @@
-{ Violations.pas
-  Reports UnRouted Nets by Pad designators
+{ UnRoute-NoNet-Violations.pas
+  Reports NoNets & UnRouted Nets by Pad designators
 
   To Use:
   Run the DRC or just the UnRoutedNets rule in PCB Rules & violations panel.
