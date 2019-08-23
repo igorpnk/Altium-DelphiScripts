@@ -139,12 +139,13 @@ begin
     Board.BoardIterator_Destroy(Iterator);
 end;
 
-procedure CheckUnaryViolation (Rule : IPCB_Rule, var ScopeList : TObjectList);
+procedure CheckUnaryViolation (Rule : IPCB_Rule, ScopeList : TObjectList);
 var
     RuleKind    : TRuleKind;
     Prim, Prim2 : IPCB_Primitive;
     Violation   : IPCB_Violation;
-    ViolDesc    : WideString;
+    ViolDesc    : TPCBString;
+    txt         : WideString;
     I, J        : integer;
     VCount      : integer;
 
@@ -154,8 +155,8 @@ begin
 
     for I := 0 to (ScopeList.Count - 1) do
     begin
-        Prim := ScopeList.Items[I];
-        Rule.Scope1Includes(Prim);
+        Prim := ScopeList.Items(I);
+     //   Rule.Scope1Includes(Prim);
         Rule.CheckUnaryScope (Prim);
         // Rule := Board.FindDominantRuleForObjectPair(Prim1, Prim2, RuleKind);
         // Rule := Board.FindDominantRuleForObject(Prim1, RuleKind);
@@ -164,18 +165,22 @@ begin
         begin
             inc(VCount);
             Board.AddPCBObject(Violation);
-            ViolDesc := Violation.Description;
-//            Setlength(ViolDesc, 50);
-            Rpt.Add('U ' + IntToStr(VCount) + ' ' + PadRight(Prim.ObjectIDString, 10) + '            ' + PadRight(Violation.Name, 20) + ' '
-                    + ViolDesc + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
             Prim.SetState_DRCError(true);
             Prim.GraphicallyInvalidate;
+
+            Rule.Descriptor;
+            Violation.Detail;
+            ViolDesc := Violation.Description;
+            txt := ViolDesc + ' ';
+            txt := PadRight(txt, 50);
+            Rpt.Add('U ' + IntToStr(VCount) + ' ' + PadRight(Prim.ObjectIDString, 10) + '            ' + PadRight(Violation.Name, 20) + ' '
+                    + txt + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
         end;
     end;
     Rpt.Add(' Total Unary Rule Violation Count : ' + IntToStr(VCount));
 end;
 
-procedure CheckBinaryViolation (Rule : IPCB_Rule, var Scope1List : TObjectList, var Scope2List : TObjectList);
+procedure CheckBinaryViolation (Rule : IPCB_Rule, Scope1List, Scope2List : TObjectList);
 var
     RuleKind    : TRuleKind;
     Prim, Prim2 : IPCB_Primitive;
@@ -377,7 +382,7 @@ var
     WS        : IWorkSpace;
     Prj       : IProject;
     PrimDoc   : IDocument;
-    Violation : IViolation;
+    DMViolate : IViolation;
     i, j      : integer;
     PCBObj1   : IPCB_Primitive;
     PCBObj2   : IPCB_Primitive;
@@ -400,10 +405,10 @@ begin
 
     for i := 0 to PrimDoc.DM_ViolationCount do
     begin
-        Violation := DM_Violations(i);
+        DMViolate := DM_Violations(i);
 
-        Rpt.Add('Violation Kind : ' + IntToStr(Violation.DM_ErrorKind) + ' Desc : ' + Violation.DM_DescriptorString + '  Detail :' + Violation.DM_DetailString);
-        Rpt.Add(' Num Objs : ' + InttoStr(Violation.DM_RelatedObjectCount) );
+        Rpt.Add('Violation Kind : ' + IntToStr(DMViolate.DM_ErrorKind) + ' Desc : ' + DMViolate.DM_DescriptorString + '  Detail :' + DMViolate.DM_DetailString);
+        Rpt.Add(' Num Objs : ' + InttoStr(DMViolate.DM_RelatedObjectCount) );
 {IViolation methods
 DM_ErrorKind
 DM_ErrorLevel
@@ -420,7 +425,7 @@ DM_DetailString
    //     PCBObj2 := Violation.Primitive2;
 
    //     If Rule <> Nil Then
-        for j := 0 to (Violation.DM_RelatedObjectCount - 1) do
+        for j := 0 to (DMViolate.DM_RelatedObjectCount - 1) do
         begin
 
 //            if Rule.ObjectID = eRule_BrokenNets then

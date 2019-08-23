@@ -200,10 +200,10 @@ begin
                 if Violation <> nil then
                 begin
                     Board.AddPCBObject(Violation);
-                    ViolDesc := Violation.Description;
+                    ViolDesc := Copy(Violation.Description, 0, 60);
                     //Setlength(ViolDesc,40);
                     Rpt.Add('U  ' + PadRight(Prim1.ObjectIDString, 10) + '            ' + PadRight(Violation.Name, 20) + ' '
-                            + ViolDesc + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
+                            + PadRight(ViolDesc, 60) + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
 
                     Prim1.SetState_DRCError(true);
                     Prim1.GraphicallyInvalidate;
@@ -223,10 +223,10 @@ begin
                     if Violation <> nil then
                     begin
                         Board.AddPCBObject(Violation);
-                        ViolDesc := Violation.Description;
+                        ViolDesc := Copy(Violation.Description, 0, 60;
                         //SetLength(ViolDesc,40);
                         Rpt.Add('B  '+ PadRight(Prim1.ObjectIDString, 10) + ' ' + PadRight(Prim2.ObjectIDString, 10) + ' ' + PadRight(Violation.Name, 20)
-                                + ' ' + ViolDesc + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
+                                + ' ' + PadRight(ViolDesc, 60) + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
                         Prim1.SetState_DRCError(true);
                         Prim2.SetState_DRCError(true);
                         Prim1.GraphicallyInvalidate;
