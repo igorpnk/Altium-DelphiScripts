@@ -1,7 +1,7 @@
 # Altium-DelphiScripts
 Scripts for Altium Designer 17/18.
 
-PCB: 
+PCB:
 MechLayerNames /MechLayerNames.pas
 > Export/Import mech layer names, colours & mechanical pairs etc.
  
