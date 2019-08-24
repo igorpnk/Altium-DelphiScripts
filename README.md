@@ -1,7 +1,7 @@
 # Altium-DelphiScripts
 Scripts for Altium Designer 17/18.
 
-PCB:
+# PCB:
 MechLayerNames /MechLayerNames.pas
 > Export/Import mech layer names, colours & mechanical pairs etc.
  
@@ -12,6 +12,6 @@ DisperseComponents / DisperseComps.pas >
 > disperse/arrange unplaced components by class or source SchDoc into clusters at RHS edge of board outline.
 
 
-OutJob:
+# OutJob:
 OutJob-Script / SimpleOJScript.pas
 > demo of OutJob run script interacting with OutJob interface (Configure, Change & Generate)
