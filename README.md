@@ -11,6 +11,8 @@ RunDesignRules / RunDesignRulesZone.pas
 DisperseComponents / DisperseComps.pas >
 > disperse/arrange unplaced components by class or source SchDoc into clusters at RHS edge of board outline.
 
+CleanNets / CleanRBConnections.pas
+> "cleans" the rubberband Connections after scripted FP move etc.
 
 # OutJob:
 OutJob-Script / SimpleOJScript.pas
