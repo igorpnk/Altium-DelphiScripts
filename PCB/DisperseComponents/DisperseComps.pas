@@ -12,6 +12,7 @@ B. Miller
                    CleanNets to refresh connection lines.
 10/07/2019 : v0.31 Round the final Comp location to job units & board origin offset.
 14/07/2019 : v0.40 Class Component subtotals & Room placement; tweaks to spacing
+02/09/2019 : v0.41 Fix CleanNets; was changing the iterated objects.
 
 Notes  Board.DisplayUnits TUnit returns wrong values !
 
@@ -178,25 +179,36 @@ begin
     Result := Result or Board.BoardOutline.GetState_StrictHitTest(RuleBR.right, RuleBR.top);
 end;
 
-Procedure CleanUpNetConnections(Board : IPCB_Board);
+procedure CleanUpNetConnections(Board : IPCB_Board);
 var
     Iterator : IPCB_BoardIterator;
     Connect  : IPCB_Connection;
-
+    Net      : IPCB_Net;
+    NetList  : TObjectList;
+    N        : integer;
 begin
+    NetList := TObjectList.Create;
+
     Iterator := Board.BoardIterator_Create;
     Iterator.AddFilter_ObjectSet(MkSet(eConnectionObject));
     Iterator.AddFilter_LayerSet(AllLayers);
     Iterator.AddFilter_Method(eProcessAll);
-
     Connect := Iterator.FirstPCBObject;
     while (Connect <> Nil) Do
     begin
-        if Connect.Net <> Nil then
-            Board.CleanNet(Connect.Net);
+        Net := Connect.Net;
+        if Net <> Nil then
+            if NetList.IndexOf(Net) = -1 then NetList.Add(Net);
         Connect := Iterator.NextPCBObject;
     end;
     Board.BoardIterator_Destroy(Iterator);
+
+    for N := 0 to (NetList.Count - 1) do
+    begin
+        Net := NetList.Items(N);
+        Board.CleanNet(Net);
+    end;
+    NetList.Destroy;
 end;
 
 procedure GetBoardClasses(Board : IPCB_Board, var ClassList : TObjectList, const ClassKind : Integer);
