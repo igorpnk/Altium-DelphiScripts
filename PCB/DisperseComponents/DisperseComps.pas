@@ -18,7 +18,7 @@ For minimum processing duration can set LiveUpdate & debug = false.
 
 TBD/Notes:  Board.DisplayUnits - TUnit returns wrong values (reversed) in AD17!   (Client.GetProductVersion;)
             Sort classes & Rooms into a sensible order.
-            
+
 B. Miller
 06/07/2019 : v0.1  Initial POC
 07/07/2019 : v0.2  Added component bounding box offsets.
@@ -32,10 +32,13 @@ B. Miller
 03/09/2019 : v0.42 Rooms auto sizing & placement.
 05/09/2019 : v0.50 Refactored bounding box & comp offsets to reuse for Room & Room comp placement.
 06/09/2019 : v0.51 Add board origin details to reported bounding rectangle to match Rooms UI
+08/09/2019 : v0.52 Set min. Room size to max component.
+
 }
+
 const
     LiveUpdate  = true;    // display PCB changes "live"
-    debug       = false;    // report file
+    debug       = true;    // report file
     GRatio      = 1.618;   // aspect R of moved rooms.
     MilFactor   = 10;      // round off Coord in mils
     MMFactor    = 1;
@@ -48,29 +51,97 @@ var
     FileName      : WideString;
     Board         : IPCB_Board;
     BUnits        : TUnit;
-    BOrigin       : TCoordPoint;
+    BOrigin       : TPoint;
     BRBoard       : TCoordRect;
     maxXsize      : TCoord;          // largest comp in column/group
     maxRXsize     : TCoord;          // largest room in column
     SpaceFactor   : double;          // 1 == no extra dead space
     Report        : TStringList;
 
-function RndUnitPos( X : Coord, Offset : Integer, const Units :TUnits) : Coord;
+function GetBoardDetail(const dummy : integer) : TCoordRect;
+var
+    Height : TCoord;
+begin
+// returns TUnits but with swapped meanings AD17 0 == Metric but API has eMetric=1 & eImperial=0
+    BUnits := Board.DisplayUnit;
+    if (BUnits = 0) then BUnits := 1
+    else BUnits := 0;
+
+    BOrigin := Point(Board.XOrigin, Board.YOrigin);
+    BRBoard := Board.BoardOutline.BoundingRectangle;
+
+    if debug then
+    begin
+        Report := TStringList.Create;
+        Report.Add('Board originX : ' + CoordUnitToString(BOrigin.X, BUnits) + ' originY ' + CoordUnitToString(BOrigin.Y, BUnits));
+    end;
+
+// set some minimum height to work in.
+    Height := RectHeight(BRBoard) + MilsToCoord(200);
+    if Height < MilsToCoord(2000) then Height := MilsToCoord(2000);
+    Result := RectToCoordRect(
+              Rect(BRBoard.Right + MilsToCoord(400), BRBoard.Bottom + Height,
+                   kMaxCoord - MilsToCoord(10)     , BRBoard.Bottom          ) );
+end;
+
+function MinF(a, b : Double) : Double;
+begin
+    Result := a;
+    if a > b then Result := b;
+end;
+function MaxF(a, b : Double) : Double;
+begin
+    Result := b;
+    if a > b then Result := a;
+end;
+
+function RndUnitPos( X : TCoord, Offset : TCoord, const Units : TUnits) : TCoord;
 // round the TCoord position value w.r.t Offset (e.g. board origin)
 begin
     if Units = eImperial then
         Result := MilsToCoord(Round(CoordToMils(X - Offset) / MilFactor) * MilFactor) + Offset
     else
-        Result := MMsToCoord(Round(CoordToMMs(X - Offset) / MMFactor) * MMFactor) + Offset;
+        Result := MMsToCoord (Round(CoordToMMs (X - Offset) / MMFactor) *  MMFactor ) + Offset;
 end;
 
-function RndUnit( X : Coord, Offset : Integer, const Units :TUnits) : Coord;
+function RndUnit( X : double, const Units : TUnits) : double;
 // round the value w.r.t Offset (e.g. board origin)
 begin
-    if Units = eImperial then
-        Result := Round((X - Offset) / MilFactor) * MilFactor + Offset
+    if (Units = eImperial) then
+        Result := Round(X / MilFactor) * MilFactor
     else
-        Result := Round((X - Offset) / MMFactor) * MMFactor + Offset;
+        Result := Round(X / MMFactor)  * MMFactor;
+end;
+
+function GetComponentBR(Comp : IPCB_Component) : TCoordRect;
+var
+    temp   : TCoord;       // dodgy rect forms.
+begin
+    Result := RectToCoordRect(Comp.BoundingRectangleNoNameComment);      //TCoord
+//    Result   := Comp.BoundingRectangleForPainting;    // inc. masks
+//    Result   := Comp.BoundingRectangleForSelection;
+    temp := Result.Y1;
+    if Result.Y2 < temp then
+    begin
+        Result.Y1 := Result.Y2;
+        Result.Y2 := temp;
+    end;
+end;
+
+function GetComponentSize(Comp : IPCB_Component) : TPoint;
+var
+    BRComp : TCoordRect;
+begin
+    BRComp := GetComponentBR(Comp);
+    Result := Point(RectWidth (BRComp), RectHeight(BRComp) );
+end;
+
+function GetComponentArea(Comp : IPCB_Component) : double; {sq mils}
+var
+    BRSize : TPoint;
+begin
+    BRSize := GetComponentSize(Comp);
+    Result := abs(CoordToMils(BRSize.X) * CoordToMils(BRSize.Y) );
 end;
 
 function TestInsideBoard(Component : IPCB_Component) : boolean;
@@ -92,10 +163,9 @@ begin
     Component.GroupIterator_Destroy(PIter);
 end;
 
-procedure TestStartPosition(var LocationBox : TCoordRect, var LBOffset : TCoordPoint, var maxXCSize : TCoord, const CSize : TCoordPoint, const Opern : integer);
+procedure TestStartPosition(var LocationBox : TCoordRect, var LBOffset : TPoint, var maxXCSize : TCoord, const CSize : TPoint, const Opern : integer);
 var
     tempOffsetY : TCoord;
-
 begin
     if Opern = TSP_NewCol then
         LBOffset.Y := LBOffset.Y + MilsToCoord(100);               // new class offset in column.
@@ -103,13 +173,13 @@ begin
     tempOffsetY := LBOffset.Y;
     if Opern = TSP_After then                                      // next footprint Y coord.
     begin
-        if CSize.Y < MilsToCoord(150) then
+        if CSize.Y < MilsToCoord(100) then
             LBOffset.Y := LBOffset.Y + CSize.Y * SpaceFactor
         else
-            LBOffset.Y := LBOffset.Y + CSize.Y + MilsToCoord(80);
+            LBOffset.Y := LBOffset.Y + CSize.Y + MilsToCoord(50);
     end;
 
-    if ((LocationBox.Y1 + tempOffsetY + CSize.Y) > LocationBox.Y2) then       // col too high or force to start new column with every new class/sourcedoc
+    if ((LocationBox.Y1 + tempOffsetY + CSize.Y) > LocationBox.Y2) then  // col too high or force to start new column with every new class/sourcedoc
     begin
         LBOffset.Y := 0;
         if maxXCsize < MilsToCoord(150) then
@@ -121,35 +191,40 @@ begin
         maxXCsize := 0;
     end;
 
-    LBOffset.X := Min(LBOffset.X, kMaxCoord - LocationBox.X1 - MilsToCoord(100));
-    LBOffset.Y := Min(LBOffset.Y, kMaxCoord - LocationBox.Y1 - MilsToCoord(100));
+    LBOffset.X := Min(LBOffset.X, kMaxCoord - LocationBox.X1 - LBOffset.X - MilsToCoord(100));
+    LBOffset.Y := Min(LBOffset.Y, kMaxCoord - LocationBox.Y1 - LBOffset.Y - MilsToCoord(100));
 end;
 
-procedure PositionComp(Comp : IPCB_Component, var LocationBox : TCoordRect, var LBOffset : TCoordPoint);
+procedure PositionComp(Comp : IPCB_Component, var LocationBox : TCoordRect, var LBOffset : TPoint);
 var
+    OriginOffset : TPoint;    // component origin offset to bounding box
+    CSize        : TPoint;
     BRComp       : TCoordRect;
-    OriginOffset : TCoordPoint;    // component origin offset to bounding box
-    CSize        : TCoordPoint;
+    temp         : TCoord;
 
 begin
-  //  BRComp   := RectToCoordRect(Comp.BoundingRectangleNoNameComment);
-    BRComp   := Comp.BoundingRectangleForPainting;    // inc. masks
-
-    CSize    := Point(RectWidth(BRComp), RectHeight(BRComp));
-    CSize.X  := Max(CSize.X, MilsToCoord(20) );
-    CSize.Y  := Max(CSize.Y, MilsToCoord(20) );
+    BRComp := GetComponentBR(Comp);
+    CSize  := GetComponentSize(Comp);    //TCoord
+    CSize  := Point( Max(CSize.X, MilsToCoord(20)), Max(CSize.Y, MilsToCoord(20)) );
 
 //  will it fit?
     TestStartPosition(LocationBox, LBOffset, maxXSize, CSize, TSP_Before);
 
-    maxXSize := Max(maxXsize, CSize.X);
-    OriginOffset := Point(( Comp.x - BRComp.X1), (Comp.y - BRComp.Y1) );
+    maxXSize     := Max(maxXsize, CSize.X);
+    OriginOffset := Point(Comp.x - BRComp.X1, Comp.y - BRComp.Y1);
 
     PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_BeginModify , c_NoEventData);
+    Comp.BeginModify;
+    temp := RndUnitPos(LocationBox.X1 + LBOffset.X + OriginOffset.X, BOrigin.X, BUnits);   //TCoord
+    temp := Min(temp, kMaxCoord - 1000);
+    Comp.x := temp;
 
-    Comp.x := RndUnitPos(LocationBox.X1 + LBOffset.X + OriginOffset.X, BOrigin.X, BUnits);
-    Comp.y := RndUnitPos(LocationBox.Y1 + LBOffset.Y + OriginOffset.Y, BOrigin.Y, BUnits);
+    temp := RndUnitPos(LocationBox.Y1 + LBOffset.Y + OriginOffset.Y, BOrigin.Y, BUnits);
+    temp := Min(temp, kMaxCoord - 1000);
+    Comp.y := temp;
+    Comp.SetState_XSizeYSize;
 
+    Comp.EndModify;
     PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_EndModify , c_NoEventData);
     Board.ViewManager_GraphicallyInvalidatePrimitive(Comp);
 
@@ -160,25 +235,29 @@ begin
                  + ' offX  ' + CoordUnitToString(LBOffset.X, BUnits) + ' offY ' + CoordUnitToString(LBOffset.Y, BUnits) );
 end;
 
-procedure PositionRoom(Room : IPCB_ConfinementConstraint, RArea : Double, LocationBox : TCoordRect, var LBOffset : TCoordPoint);
+procedure PositionRoom(Room : IPCB_ConfinementConstraint, RArea : Double, LocationBox : TCoordRect, var LBOffset : TPoint);
 var
     RoomBR    : TCoordRect;
     Length    : TCoord;
     Height    : TCoord;
-    RSize     : TCoordPoint;
+    RSize     : TPoint;
 
 begin
-    // Area in sq mils
-    RArea := RArea * SpaceFactor * SpaceFactor;
+    // Area in sq mils but Rooms placed by default board units
+    RArea := RArea * SpaceFactor; // * SpaceFactor;
     // new size
     Length := Sqrt(RArea * GRatio);
     Height := RArea / Length;
-    Length := MilsToCoord( RndUnit(Length, 0, BUnits) );
-    Height := MilsToCoord( RndUnit(Height, 0, BUnits) );
-    Length := Max(Length, MilsToCoord(100 * GRatio) );
-    Height := Max(Height, MilsToCoord(100) );
+    Length := MaxF(Length, 100 * GRatio);
+    Height := MaxF(Height, 100);
+    Height := MilsToCoord(Height);
+    Length := MilsToCoord(Length);
 
-    RSize := Point(Length, Height);
+    Length := MinF(Length, kMaxCoord / 8);   // safety limits
+    Height := MinF(Height, kMaxCoord / 8);
+
+
+    RSize := Point(RndUnitPos(Length, 0, BUnits), RndUnitPos(Height, 0, BUnits) );
 
 //  will it fit?
     TestStartPosition(LocationBox, LBOffset, maxRXSize, RSize, TSP_Before);
@@ -186,14 +265,15 @@ begin
 
 //    RoomBR   := Room.BoundingRectangle;
     RoomBR := RectToCoordRect(         //          Rect(L, T, R, B)
-              Rect(RndUnitPos(LocationBox.X1 + LBOffset.X,          BOrigin.X, BUnits), RndUnitPos(LocationBox.Y1 + LBOffset.Y + Height, BOrigin.Y, BUnits),
-                   RndUnitPos(LocationBox.X1 + LBOffset.X + Length, BOrigin.X, BUnits), RndUnitPos(LocationBox.Y1 + LBOffset.Y,          BOrigin.Y, BUnits)) );
+              Rect(RndUnitPos(LocationBox.X1 + LBOffset.X,           BOrigin.X, BUnits), RndUnitPos(LocationBox.Y1 + LBOffset.Y + RSize.Y, BOrigin.Y, BUnits),
+                   RndUnitPos(LocationBox.X1 + LBOffset.X + RSize.X, BOrigin.X, BUnits), RndUnitPos(LocationBox.Y1 + LBOffset.Y,           BOrigin.Y, BUnits)) );
     Room.BeginModify;
     Room.BoundingRect := RoomBR;
     Room.EndModify;
 
     TestStartPosition(LocationBox, LBOffset, maxRXSize, RSize, TSP_After);
-    RSize := Point(RectWidth(RoomBR), RectHeight(RoomBR));
+    RSize := Point(RectWidth (RoomBR), RectHeight(RoomBR) );
+
     if debug then
         Report.Add('Room : ' + Room.Identifier +  '  absX ' + CoordUnitToString(Room.X - BOrigin.X, BUnits) + ' absY ' + CoordUnitToString(Room.Y - BOrigin.Y, BUnits)
                  + '  offX ' + CoordUnitToString(LBOffset.X, BUnits) + ' offY ' + CoordUnitToString(LBOffset.Y, BUnits)  );
@@ -201,50 +281,70 @@ end;
 
 procedure PositionCompsInRoom(Room : IPCB_ConfinementConstraint, CompClass : IPCB_ObjectClass);
 var
-    PCBComp   : IPCB_Component;
-    Iterator  : IPCB_BoardIterator;
-    I         : integer;
-    RoomBR    : TCoordRect;
-    LCOffset  : TCoordPoint;       // comp offsets in room box
+    CompList     : TObjectList;
+    Comp, Comp2  : IPCB_Component;
+    CArea        : double;
+    Iterator     : IPCB_BoardIterator;
+    I            : integer;
+    RoomBR       : TCoordRect;
+    LCOffset     : TPoint;       // comp offsets in room box
 
 begin
-//    RoomBR := RectToCoordRect(Room.BoundingRectangleForPainting);
-//    Room.BoundingRectangleForSelection;
-    RoomBR := Room.BoundingRect;   // not BoundingRectangle !
-
+    CompList := TObjectList.Create;
+//    RoomBR := RectToCoordRect(Room.BoundingRectangleForPainting); //  Room.BoundingRectangleForSelection;
+    RoomBR := Room.BoundingRect;    // not BoundingRectangle !
     if debug then
         Report.Add('Room : ' + Room.Identifier +  '  X1 ' + CoordUnitToString(RoomBR.X1 - BOrigin.X, BUnits) + ' Y1 ' + CoordUnitToString(RoomBR.Y1 - BOrigin.Y, BUnits)
                                                 + '  X2 ' + CoordUnitToString(RoomBR.X2 - BOrigin.X, BUnits) + ' Y2 ' + CoordUnitToString(RoomBR.Y2 - BOrigin.Y, BUnits)  );
-    LCOffset := Point(10, 10);
+    LCOffset := Point(MilsToCoord(10), MilsToCoord(10));
     maxXsize := 0;
 
     Iterator := Board.BoardIterator_Create;
     Iterator.AddFilter_ObjectSet(MkSet(eComponentObject));
     Iterator.AddFilter_LayerSet(SignalLayers);
-    PCBComp := Iterator.FirstPCBObject;
-    while PCBComp <> Nil Do
+    Comp := Iterator.FirstPCBObject;
+    while Comp <> Nil Do
     begin
-        if PCBComp.ComponentKind <> eComponentKind_Graphical then
-            if CompClass.IsMember(PCBComp) then
-                if not TestInsideBoard(PCBComp) then
+        if (Comp.ComponentKind <> eComponentKind_Graphical) then
+            if CompClass.IsMember(Comp) then
+                if not TestInsideBoard(Comp) then
                 begin
-                     PositionComp(PCBComp, RoomBR, LCOffset);
+                    CArea := GetComponentArea(Comp);
+                    for I := 0 to (CompList.Count - 1) do
+                    begin
+                        Comp2 := CompList.Items(I);
+                        if (CArea > GetComponentArea(Comp2)) then
+                        begin
+                            CompList.Insert(I, Comp);
+                            break;
+                        end;
+                    end;
+                    if (I = CompList.Count) then CompList.Add(Comp);
                 end;
-        PCBComp := Iterator.NextPCBObject;
+        Comp := Iterator.NextPCBObject;
     end;
     Board.BoardIterator_Destroy(Iterator);
+
+    for I := 0 to (CompList.Count - 1) do
+    begin
+        Comp := CompList.Items(I);
+        PositionComp(Comp, RoomBR, LCOffset);
+    end;
+    CompList.Destroy;
 end;
 
-function GetReqRoomArea(Brd : IPCB_Board, CompClass : IPCB_ObjectClass) : Double; {sq mils}
+function GetReqRoomArea(Brd : IPCB_Board, CompClass : IPCB_ObjectClass) : TFloatRec; {sq TCoord}
 var
-    PCBComp  : IPCB_Component;
-    Iterator : IPCB_BoardIterator;
-    BRComp   : TCoordRect;
-    Area     : Double;
-
+    PCBComp    : IPCB_Component;
+    Iterator   : IPCB_BoardIterator;
+    Area       : Double;          {sq mils}
+    CSize      : TPoint;
+    maxX, maxY : TCoord;
 begin
     Area := 0;
-    CompClass.Name;
+    CSize := Point(0, 0);
+    maxX := 0; maxY := 0;
+//    CompClass.Name;
     Iterator := Board.BoardIterator_Create;
     Iterator.AddFilter_ObjectSet(MkSet(eComponentObject));
     Iterator.AddFilter_LayerSet(SignalLayers);
@@ -253,12 +353,25 @@ begin
     begin
         if CompClass.IsMember(PCBComp) then
         begin
-            BRComp := PCBComp.BoundingRectangleNoNameComment;
-            Area := Area + abs(CoordToMils( RectWidth(BRComp)) * CoordToMils(RectHeight(BRComp)) );
+            Area := Area + GetComponentArea(PCBComp);  // sq mils
+            CSize := GetComponentSize(PCBComp);        // TCoord
+            maxX := Max(maxX, CSize.X);
+            maxY := Max(maxY, CSize.Y);
         end;
         PCBComp := Iterator.NextPCBObject;
     end;
     Board.BoardIterator_Destroy(Iterator);
+
+    maxX := CoordToMils(maxX);
+    maxY := CoordToMils(maxY);
+
+    if (maxX > 0) and (maxY > 0) then
+    begin
+        if maxX < (maxY * GRatio) then
+            maxX := (maxY * GRatio)
+        else maxY := (maxX / GRatio);
+        if ((maxX * maxY / Area) < 4) and (Area < (maxX * maxY)) then Area := abs(maxX * maxY);
+    end;
     Result := Area;
 end;
 
@@ -268,9 +381,13 @@ var
     RuleBR : TCoordRect;
 
 begin
-// Rule.PolygonOutline  ;       // may have to consider
+{  Rule.Polygon / Outline  ;       // may have to consider
+   for I := 0 To Polygon.PointCount - 1 do
+   begin
+   if Polygon.Segments[I].Kind = ePolySegmentLine then
+}
     Result := false;
-    RuleBR := Room.BoundingRectangle;
+    RuleBR := Room.BoundingRect;
     Result := Result or Board.BoardOutline.GetState_StrictHitTest(RuleBR.left, RuleBR.bottom);
     Result := Result or Board.BoardOutline.GetState_StrictHitTest(RuleBR.left, RuleBR.top);
     Result := Result or Board.BoardOutline.GetState_StrictHitTest(RuleBR.right, RuleBR.bottom);
@@ -346,7 +463,7 @@ begin
     PCBComp := Iterator.FirstPCBObject;
     while PCBComp <> Nil Do
     begin
-        if PCBComp.ComponentKind <> eComponentKind_Graphical then
+        if (PCBComp.ComponentKind <> eComponentKind_Graphical) then
         begin
             for I := 0 to (ClassList.Count - 1) do
             begin
@@ -377,96 +494,120 @@ end;
 
 Procedure DisperseByClass;
 Var
-   PCBComp       : IPCB_Component;
-   LocRect       : TCoordRect;
-   LCOffset      : TCoordPoint;
-   Iterator      : IPCB_BoardIterator;
-   ClassList     : TObjectList;
-   CompClass     : IPCB_ObjectClass;
-   ClassSubTotal : TParameterList;
-   CSubTotal     : integer;
-   I             : integer;
-   skip          : boolean;
+   PCBComp          : IPCB_Component;
+   LocRect          : TCoordRect;
+   LCOffset         : TPoint;
+   Iterator         : IPCB_BoardIterator;
+   ClassList        : TObjectList;
+   ClassList2       : TObjectList;     // sorted by member count
+   CompClass        : IPCB_ObjectClass;
+   CompClass2       : IPCB_ObjectClass;
+   ClassSubTotal    : TParameterList;
+   CSubTotal        : integer;
+   CSubTotal2       : integer;
+   minCTot, maxCTot : integer;
+   I, J             : integer;
+   skip             : boolean;
 
 Begin
     Board := PCBServer.GetCurrentPCBBoard;
     If Board = Nil Then Exit;
 
+    LocRect := GetBoardDetail(0);
+
     BeginHourGlass(crHourGlass);
 
-    if debug then Report := TStringList.Create;
-    BOrigin := Point(Board.XOrigin, Board.YOrigin);
-    BRBoard := Board.BoardOutline.BoundingRectangle;
-    LocRect := RectToCoordRect(
-               Rect(BRBoard.Right + MilsToCoord(400), BRBoard.Top + MilsToCoord(200),
-                    kMaxCoord - MilsToCoord(10), BRBoard.Bottom) );
-    LCOffset := Point(0, 0);
+    LCoffset := Point(0, 0);
     maxXsize := 0;
     SpaceFactor := 2;
 
-// returns TUnits but with swapped meanings AD17 0 == Metric but API has eMetric = 1
-    BUnits := Board.DisplayUnit;
-    if BUnits = 0 then BUnits := 1
-    else BUnits := 0;
-
     ClassList := TObjectList.Create;
     GetBoardClasses(Board, ClassList, eClassMemberKind_Component);
+
     ClassSubTotal := TParameterList.Create;
     GetClassCompSubTotals(Board, ClassList, ClassSubTotal);
 
     if debug then Report.Add('Class count = ' + IntToStr(ClassList.Count) );
 
-    Iterator := Board.BoardIterator_Create;
-    Iterator.AddFilter_ObjectSet(MkSet(eComponentObject));
-    Iterator.AddFilter_LayerSet(AllLayers);
-
-    PCBServer.PreProcess;
+    ClassList2 := TObjectList.Create;
+    minCTot := 1000000; maxCTot := 0;
 
     for I := 0 to (ClassList.Count - 1) Do
-    Begin
+    begin
         CompClass := ClassList.Items(I);
         CSubTotal := 0;
         ClassSubTotal.GetState_ParameterAsInteger(CompClass.Name, CSubTotal);
+
+        minCTot := Min(minCTot, CSubTotal);
+        maxCTot := Max(maxCTot, CSubTotal);
         skip := false;
 
-        if CompClass.SuperClass then skip := true;
+        if CompClass.SuperClass                        then skip := true;
 // all below are superclasses so redundant code..
-        if CompClass.Name = 'All Components' then skip := true;
+        if CompClass.Name = 'All Components'           then skip := true;
         if CompClass.Name = 'Outside Board Components' then skip := true;
-        if CompClass.Name = 'Inside Board Components' then skip := true;
-        if CompClass.Name = 'Bottom Side Components' then skip := true;
-        if CompClass.Name = 'Top Side Components' then skip := true;
+        if CompClass.Name = 'Inside Board Components'  then skip := true;
+        if CompClass.Name = 'Bottom Side Components'   then skip := true;
+        if CompClass.Name = 'Top Side Components'      then skip := true;
 
 // potential location below for special hacks..
 //        skip := true;
-//        if ansipos('_Cell', CompClass.Name) = 0  then skip := true;
-//        if ansipos('Cell', CompClass.Name) > 0  then skip := false;
+//        if ansipos('_Cell', CompClass.Name) = 0   then skip := true;
+//        if ansipos('Cell', CompClass.Name) > 0    then skip := false;
 
         if debug then
             Report.Add('ClassName : ' + CompClass.Name + '  Kind : ' + IntToStr(CompClass.MemberKind)
                        + '  skip : ' + IntToStr(skip) + '  Member Count = ' + IntToStr(CSubTotal) );
+
         if not skip then
         begin
-            PCBComp := Iterator.FirstPCBObject;
-            while PCBComp <> Nil Do
+            for J := 0 to (ClassList2.Count - 1) do
             begin
-                if PCBComp.ComponentKind <> eComponentKind_Graphical then
-                    if CompClass.IsMember(PCBComp) then
-                        if not TestInsideBoard(PCBComp) then
-                        begin
-                            PositionComp(PCBComp, LocRect, LCOffset);
-                        end;
-                PCBComp := Iterator.NextPCBObject;
+                CompClass2 := ClassList2.Items(J);
+                ClassSubTotal.GetState_ParameterAsInteger(CompClass2.Name, CSubTotal2);
+                if (CSubTotal > CSubTotal2) then
+                begin
+                    ClassList2.Insert(J, CompClass);
+                    break;
+                end;
             end;
-
-            TestStartPosition(LocRect, LCOffset, maxXSize, Point(0, 0), TSP_NewCol);
-            if LiveUpdate then Board.ViewManager_FullUpdate;
+            if (J = ClassList2.Count) then ClassList2.Add(CompClass)
         end;
     end;
+    ClassList.Destroy;
+
+    Iterator := Board.BoardIterator_Create;
+    Iterator.AddFilter_ObjectSet(MkSet(eComponentObject));
+    Iterator.AddFilter_LayerSet(SignalLayers);
+
+    PCBServer.PreProcess;
+
+    for I := 0 to (ClassList2.Count - 1) Do
+    begin
+        CompClass := ClassList2.Items(I);
+
+        PCBComp := Iterator.FirstPCBObject;
+        while PCBComp <> Nil Do
+        begin
+            if (PCBComp.ComponentKind <> eComponentKind_Graphical) then
+                if CompClass.IsMember(PCBComp) then
+                    if not TestInsideBoard(PCBComp) then
+                    begin
+                        PositionComp(PCBComp, LocRect, LCOffset);
+                    end;
+            PCBComp := Iterator.NextPCBObject;
+        end;
+        ClassSubTotal.GetState_ParameterAsInteger(CompClass.Name, CSubTotal);
+        if CSubTotal > 0 then
+            TestStartPosition(LocRect, LCOffset, maxXSize, Point(0, 0), TSP_NewCol);
+        if LiveUpdate then Board.ViewManager_FullUpdate;
+    end;
+
     Board.BoardIterator_Destroy(Iterator);
 
     PCBServer.PostProcess;
-    ClassList.Destroy;
+    ClassList2.Destroy;
+    ClassSubTotal.Destroy;
 
     CleanUpNetConnections(Board);
     EndHourGlass;
@@ -488,7 +629,7 @@ procedure DisperseBySourceSchDoc;
 var
    PCBComp        : IPCB_Component;
    LocRect        : TCoordRect;
-   LROffset       : TCoordPoint;
+   LROffset       : TPoint;
    Iterator       : IPCB_BoardIterator;
    LSchDocs       : TStringList;
    SchDocFileName : IPCB_String;
@@ -499,39 +640,25 @@ begin
     Board := PCBServer.GetCurrentPCBBoard;
     If Board = Nil Then Exit;
 
+    LocRect := GetBoardDetail(0);
     BeginHourGlass(crHourGlass);
 
-    BOrigin := Point(Board.XOrigin, Board.YOrigin);
-    if debug then
-    begin
-        Report := TStringList.Create;
-        Report.Add('Board originX : ' + CoordUnitToString(BOrigin.X, BUnits) + ' originY ' + CoordUnitToString(BOrigin.Y, BUnits));
-    end;
-
-    BRBoard := Board.BoardOutline.BoundingRectangle;
-    LocRect := RectToCoordRect(     //             Rect(L, T, R, B)
-               Rect(BRBoard.Right + MilsToCoord(400), BRBoard.Top + MilsToCoord(200),
-                    kMaxCoord - MilsToCoord(10), BRBoard.Bottom) );
-    LROffset := Point(0, 0);
-    maxXsize := 0;
+    LROffset    := Point(0, 0);
+    maxXsize    := 0;
     SpaceFactor := 2;
-
-    BUnits := Board.DisplayUnit;
-    if BUnits = 0 then BUnits := 1
-    else BUnits := 0;
 
     LSchDocs := TStringList.Create;
 
     Iterator := Board.BoardIterator_Create;
     Iterator.AddFilter_ObjectSet(MkSet(eComponentObject));
-    Iterator.AddFilter_LayerSet(AllLayers);
+    Iterator.AddFilter_LayerSet(SignalLayers);
 
     PCBComp := Iterator.FirstPCBObject;
     while PCBComp <> Nil Do
     begin
         SchDocFileName := PCBComp.SourceHierarchicalPath;
         if SchDocfileName <> '' then
-            if LSchDocs.IndexOf(SchDocFileName) = -1 then
+            if (LSchDocs.IndexOf(SchDocFileName) = -1) then
                 LSchDocs.Add(SchDocFileName);
 
         PCBComp := Iterator.NextPCBObject;
@@ -539,7 +666,7 @@ begin
     if debug then Report.Add('Source Doc count = ' + IntToStr(LSchDocs.Count) );
 
     Iterator.AddFilter_ObjectSet(MkSet(eComponentObject));
-    Iterator.AddFilter_LayerSet(AllLayers);
+    Iterator.AddFilter_LayerSet(SignalLayers);
 
     PCBServer.PreProcess;
 
@@ -589,10 +716,9 @@ var
     Iterator      : IPCB_BoardIterator;
     Rule          : IPCB_Rule;
     Room          : IPCB_ConfinementConstraint;
-    RuleBR        : TCoordRect;
     LocRect       : TCoordRect;
-    LROffset      : TCoordPoint;       // room offsets in main big box
-    RoomArea      : TDouble;
+    LROffset      : TPoint;       // room offsets in main big box
+    RoomArea      : Double;
     RoomRuleList  : TObjectList;
     ClassList     : TObjectList;
     CompClass     : IPCB_ObjectClass;
@@ -604,26 +730,12 @@ var
 begin
     Board := PCBServer.GetCurrentPCBBoard;
     If Board = Nil Then Exit;
-
-    BUnits := Board.DisplayUnit;
-    if BUnits = 0 then BUnits := 1
-    else BUnits := 0;
-
-    BOrigin := Point(Board.XOrigin, Board.YOrigin);
-    BRBoard := Board.BoardOutline.BoundingRectangle;
-    LocRect := RectToCoordRect(
-               Rect(BRBoard.Right + MilsToCoord(400), BRBoard.Top + MilsToCoord(200),
-                    kMaxCoord - MilsToCoord(10), BRBoard.Bottom) );
-    LROffset := Point(0, 0);
-    maxRXSize := 0;
+    LocRect := GetBoardDetail(0);
 
     BeginHourGlass(crHourGlass);
 
-    if debug then
-    begin
-        Report := TStringList.Create;
-        Report.Add('Board originX : ' + CoordUnitToString(BOrigin.X, BUnits) + ' originY ' + CoordUnitToString(BOrigin.Y, BUnits));
-    end;
+    LROffset := Point(0, 0);
+    maxRXSize  := 0;
 
     RoomRuleList := TObjectList.Create;
 
@@ -642,9 +754,9 @@ begin
 
     ClassList := TObjectList.Create;
     GetBoardClasses(Board, ClassList, eClassMemberKind_Component);
+
     ClassSubTotal := TParameterList.Create;
     GetClassCompSubTotals(Board, ClassList, ClassSubTotal);
-
 
     if debug then Report.Add('Rooms Rule Count = ' + IntToStr(RoomRuleList.Count));
 
@@ -679,21 +791,19 @@ begin
                     if debug then Report.Add('Desc   ' + Room.Descriptor);
                     if debug then Report.Add('SDS    ' + Room.GetState_ScopeDescriptorString);
 
-                    RoomArea {sq mils} := GetReqRoomArea(Board, CompClass);
-                    if debug then Report.Add(' area sq mils ' + FormatFloat(',0.###', RoomArea) );
+                    RoomArea {sq TCoord} := GetReqRoomArea(Board, CompClass);
+                    if debug then Report.Add(' area sq mils ' + FormatFloat(',0.###', (RoomArea / SQR(k1Mil)) ) );
 
                     SpaceFactor := 2;
                     PositionRoom(Room, RoomArea, LocRect, LROffset);
 
-//                  locate components by channel index order.
-//                    LCOffset := Point(0, 0);
                     SpaceFactor := 1.6;
                     PositionCompsInRoom(Room, CompClass);
                     if LiveUpdate then Board.ViewManager_FullUpdate;
                 end;
                 Inc(J);
                 if found then
-                    if debug then  Report.Add('');
+                    if debug then Report.Add('');
             end;
         end;  // outside BO
     end;
