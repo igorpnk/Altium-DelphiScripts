@@ -10,6 +10,7 @@
  03/07/2017  : mod to fix layer names output, why was import okay ??
  23/02/2018  : added MechLayer Pairs & colours, still loads old ini files.
  18/08/2019  : Layer colours above eMech16 are all cBlack so ignore.
+ 28/08/2019  : Try improve import default filepath. 
 
 ..................................................................................}
 const
