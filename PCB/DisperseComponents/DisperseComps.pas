@@ -14,6 +14,7 @@ Things that are NOT moved:-
 Script can be re-run after partial placement to move Rooms & Components closer
  to Board Outline.
 All Room vertices & Component coordinates remain on Board grid units (integer).
+Room components are placed in descending size.
 For minimum processing duration can set LiveUpdate & debug = false.
 
 TBD/Notes:  Board.DisplayUnits - TUnit returns wrong values (reversed) in AD17!   (Client.GetProductVersion;)
@@ -32,7 +33,8 @@ B. Miller
 03/09/2019 : v0.42 Rooms auto sizing & placement.
 05/09/2019 : v0.50 Refactored bounding box & comp offsets to reuse for Room & Room comp placement.
 06/09/2019 : v0.51 Add board origin details to reported bounding rectangle to match Rooms UI
-08/09/2019 : v0.52 Set min. Room size to max component.
+08/09/2019 : v0.52 Set min. Room size to max component & set max room size limit.
+09/09/2019 : v0.53 Fixed reported (in file) room area units & added sq mm.
 
 }
 
@@ -64,8 +66,8 @@ var
 begin
 // returns TUnits but with swapped meanings AD17 0 == Metric but API has eMetric=1 & eImperial=0
     BUnits := Board.DisplayUnit;
-    if (BUnits = 0) then BUnits := 1
-    else BUnits := 0;
+    if (BUnits = eImperial) then BUnits := eMetric
+    else BUnits := eImperial;
 
     BOrigin := Point(Board.XOrigin, Board.YOrigin);
     BRBoard := Board.BoardOutline.BoundingRectangle;
@@ -243,8 +245,7 @@ var
     RSize     : TPoint;
 
 begin
-    // Area in sq mils but Rooms placed by default board units
-    RArea := RArea * SpaceFactor; // * SpaceFactor;
+    // Area in sq mils but Room.BoundingRect is placed by Coord
     // new size
     Length := Sqrt(RArea * GRatio);
     Height := RArea / Length;
@@ -297,7 +298,7 @@ begin
         Report.Add('Room : ' + Room.Identifier +  '  X1 ' + CoordUnitToString(RoomBR.X1 - BOrigin.X, BUnits) + ' Y1 ' + CoordUnitToString(RoomBR.Y1 - BOrigin.Y, BUnits)
                                                 + '  X2 ' + CoordUnitToString(RoomBR.X2 - BOrigin.X, BUnits) + ' Y2 ' + CoordUnitToString(RoomBR.Y2 - BOrigin.Y, BUnits)  );
     LCOffset := Point(MilsToCoord(10), MilsToCoord(10));
-    maxXsize := 0;
+    maxXsize := 0; CArea := 0;
 
     Iterator := Board.BoardIterator_Create;
     Iterator.AddFilter_ObjectSet(MkSet(eComponentObject));
@@ -364,6 +365,9 @@ begin
 
     maxX := CoordToMils(maxX);
     maxY := CoordToMils(maxY);
+
+// apply space factor but not to the case of one oversized FP
+    Area := Area * SpaceFactor;    // * SpaceFactor;
 
     if (maxX > 0) and (maxY > 0) then
     begin
@@ -791,10 +795,12 @@ begin
                     if debug then Report.Add('Desc   ' + Room.Descriptor);
                     if debug then Report.Add('SDS    ' + Room.GetState_ScopeDescriptorString);
 
-                    RoomArea {sq TCoord} := GetReqRoomArea(Board, CompClass);
-                    if debug then Report.Add(' area sq mils ' + FormatFloat(',0.###', (RoomArea / SQR(k1Mil)) ) );
-
                     SpaceFactor := 2;
+                    RoomArea {sq mil} := GetReqRoomArea(Board, CompClass);
+                    if debug then
+                        if BUnits = eImperial then Report.Add(' area sq in. ' + FormatFloat(',0.###', (RoomArea / SQR(1000)) ) )
+                        else  Report.Add(' area sq mm ' + FormatFloat(',0.###', (RoomArea * SQR(mmInch) / SQR(1000)) ) );
+
                     PositionRoom(Room, RoomArea, LocRect, LROffset);
 
                     SpaceFactor := 1.6;
