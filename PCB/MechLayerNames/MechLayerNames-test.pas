@@ -14,7 +14,9 @@
  23/02/2018  :  added MechLayer Pairs & colours
  27/02/2018  :  MechPair detect logic; only remove existing if any MPs detected in file
  16/06/2019  :  Test for AD19 etc.
-01/07/2019   :  messed with MechPair DNW; added MinMax MechLayer constants to report
+ 01/07/2019  :  messed with MechPair DNW; added MinMax MechLayer constants to report
+ 08/09/2019  : use _V7 layerstack for mech layer info.
+ 11/09/2019  : use & report the LayerIDs & iterate to 64 mech layers.
 
          tbd :  Use Layer Classes test in AD17 & AD19
 ..................................................................................}
@@ -29,6 +31,8 @@ var
     MechPairs  : IPCB_MechanicalLayerPairs;
     MechPair   : TMechanicalLayerPair;
     Layer      : TLayer;
+    Layer7     : TV7_Layer;
+    ML1, ML2   : integer;
 
 function LayerClassName (LClass : TLayerClassID) : WideString;
 begin
@@ -99,16 +103,16 @@ begin
     begin
         TempS.Add('');
         TempS.Add('eLayerClass ' + IntToStr(LayerClass) + '  ' + LayerClassName(LayerClass));
-
+        TempS.Add('lc.i : |   name');
         i := 1;
         LayerObj := LayerStack.First(LayerClass);
         While (LayerObj <> Nil ) do
         begin
-            LayerPos :=' ';
+            LayerPos :='';
             if LayerClass = eLayerClass_Electrical then
                LayerPos := IntToStr(Board.LayerPositionInSet(AllLayers, LayerObj));       // think this only applies to eLayerClass_Electrical
 
-           TempS.Add('lc.i : ' + IntToStr(LayerClass) + '.' + IntToStr(i) + ' | ' + LayerPos + '  name: ' + LayerObj.Name);
+           TempS.Add(Padright(IntToStr(LayerClass) + '.' + IntToStr(i),4) + ' | ' + Padright(LayerPos,3) + ' ' + LayerObj.Name);
 //       if LayerObj <> Nil then MechLayer := LayerObj;
            LayerObj := LayerStack.Next(Layerclass, LayerObj);
            Inc(i);
@@ -125,24 +129,27 @@ begin
     TempS.Add(' ----- .LayerObject(index) Mechanical ------');
     TempS.Add('');
     
- 
-    for i := 1 to 32 do
+  
+    LayerStack := Board.LayerStack_V7;
+    TempS.Add('Idx LayerID    boardlayername      layername           V6_LayerID');
+    for i := 1 to 64 do
     begin
-        Layer := i + MinMechanicalLayer - 1;
-        LayerObj := LayerStack.LayerObject[Layer];
-        LayerName := 'Broken method NO name';
-        if LayerObj <> Nil then                  // 3 different indices for the same object info, Fg Madness!!!
+        ML1 := LayerUtils.MechanicalLayer(i);
+        Layer := i + MinMechanicalLayer - 1;        // just calcs same as above until eMech16.
+        LayerObj := LayerStack.LayerObject_V7[ML1];
+        LayerName := 'broken method NO name';
+        if LayerObj <> Nil then                     // 2 different indices for the same object info, Fg Madness!!!
+        begin
             LayerName := LayerObj.Name;
-        TempS.Add(IntToStr(i) + ' ' + IntToStr(Layer) + ' ' + Board.LayerName(ILayer.MechanicalLayer(i)) + ' ' + LayerName);
+            Layer7 := LayerObj.V7_LayerID;      // __TV7_Layer_Wrapper() how to use?
+
+            Layer7;
+        end;
+        TempS.Add(PadRight(IntToStr(i),3) + ' ' + PadRight(IntToStr(ML1),10) + ' ' + PadRight(Board.LayerName(ML1),20) + ' ' + PadRight(LayerName,20) + ' ' + IntToStr(LayerObj.V6_LayerID));
         // LayerObj.UsedByPrims;
     end;
 
-{
-Function  LayerPositionInSet(ALayerSet : TLayerSet; ALayerObj : IPCB_LayerObject)  : Integer;
- ex. where do layer consts come from??            VV             VV
-      LowPos  := PCBBoard.LayerPositionInSet( SignalLayers + InternalPlanes, LowLayerObj);
-      HighPos := PCBBoard.LayerPositionInSet( SignalLayers + InternalPlanes, HighLayerObj);
-}
+
 { LayerPair[I : Integer] property defines indexed layer pairs and returns a TMechanicalLayerPair record of two PCB layers.
   TMechanicalLayerPair = Record
     Layer1 : TLayer;
@@ -151,7 +158,7 @@ Function  LayerPositionInSet(ALayerSet : TLayerSet; ALayerObj : IPCB_LayerObject
 }
     TempS.Add('');
     TempS.Add('');
-    TempS.Add(' ----- MechLayerPairs Legacy 1 to 32?? -----');
+    TempS.Add(' ----- MechLayerPairs Legacy 1 to 32/64 ?? -----');
     TempS.Add('');
 
     MechPairs := Board.MechanicalPairs;
@@ -169,8 +176,8 @@ Layer1 : TLayer;
 Layer2 : TLayer;
 End;
 }
-//            MechPair ;   //  .Layer1;             // does NOT work
-//            Layer := MechPair.GetTypeInfoCount(0);         //__TMechanicalLayerPair__Wrapper
+//            MechPair ;   //  .Layer1;                      // does NOT work
+//            Layer := MechPair.GetTypeInfoCount(0);         // __TMechanicalLayerPair__Wrapper
 //            Layer := MechPair;
 
 //     FFS !! why is MechPair Layer properties not the same/similar to DrillPairs.
@@ -183,31 +190,26 @@ End;
 
   // mickey mouse soln
 
-    for i := 1 to 32 do 
+    for i := 1 to 64 do
 //  for Layer := MinMechanicalLayer to MaxMechanicalLayer do
     begin
+        ML1 := LayerUtils.MechanicalLayer(i);
         Layer := i + MinMechanicalLayer - 1;
-        MechLayer := LayerStack.LayerObject[Layer];      // this method does not work above eMech24 !!
+        MechLayer := LayerStack.LayerObject_V7[ML1];
 
+//        MechLayer := LayerStack.LayerObject[Layer];      // this method does not work above eMech24 !!
 //        if (MechLayer <> Nil) or true then            // this test STOPS layers above some eMech showing up !!
 //        begin
 
 //        if MechPairs.LayerUsed(Layer) then         // always false ! ; pass it (MechLayer) & will crash!
 //        begin
-            for j := (i + 1) to 32 do
+
+            for j := (i + 1) to 64 do
             begin
-                if MechPairs.PairDefined(ILayer.MechanicalLayer(i), ILayer.MechanicalLayer(j)) then
-                    TempS.Add('MechLayer ' + IntToStr(i) + '-' + IntToStr(j) + ' Pair ' + Board.LayerName(ILayer.MechanicalLayer(i)) + ' - ' + Board.LayerName(ILayer.MechanicalLayer(j)) );
+                ML2 := LayerUtils.MechanicalLayer(j);
+                if MechPairs.PairDefined(ML1, ML2) then
+                    TempS.Add('MechLayer ' + IntToStr(i) + '-' + IntToStr(j) + ' Pair ' + Board.LayerName(ML1) + ' - ' + Board.LayerName(ML2) );
             end;
-
-//        IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'Enabled', MechLayer.MechanicalLayerEnabled);
-//        IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'Show',    MechLayer.IsDisplayed[Board]);
-//        IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'Sheet',   MechLayer.LinkToSheet);
-//        IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'SLM',     MechLayer.DisplayInSingleLayerMode);
-//        IniFile.WriteString('MechLayer' + IntToStr(i), 'Color',   ColorToString(Board.LayerColor[MechLayer.V6_LayerID]));
-
-//        end;
-
     end;
 
     WS := GetWorkSpace;
@@ -274,3 +276,9 @@ end;
        LyrObj := Stack.LayerObject[Lyr];
 }
 
+{
+Function  LayerPositionInSet(ALayerSet : TLayerSet; ALayerObj : IPCB_LayerObject)  : Integer;
+ ex. where do layer consts come from??            VV             VV
+      LowPos  := PCBBoard.LayerPositionInSet( SignalLayers + InternalPlanes, LowLayerObj);
+      HighPos := PCBBoard.LayerPositionInSet( SignalLayers + InternalPlanes, HighLayerObj);
+}
