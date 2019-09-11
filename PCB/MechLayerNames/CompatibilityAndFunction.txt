@@ -4,15 +4,13 @@ Altium version compatibility & functionality summary.
 AD17, AD18
 PcbDoc: 32 max mechanical layers.
 
-Script: 1 - 32 mechanical layers partially supported (name, enabled, colour, mech pairs)
-Script: 16 - 32 mech layer colours NOT supported & NOT changed.
-
+Script: 1 - 32 mechanical layers supported (name, enabled, colour, mech pairs)
 
  
 AD19
-PcbDoc: legacy (AD18) stack mode or 1024? max mech layers
-PcbDoc: Layer type
-PcbDoc: 1024? mode appears to restack existing mech layers in a "fill from the top" manner by remapping, they then appear twice (observed in my test script).
+PcbDoc: Can be in legacy (AD18) stack mode or 1024? max mech layers mode.
+        Introduces "Layer Type" to mech layers
+        1024? mode appears to restack existing mech layers in a "fill from the top" manner by remapping, they then appear twice (observed in my test script).
 
 Script: legacy mode same as AD17/AD18
 Script: 1024? mode appears to work same as legacy.

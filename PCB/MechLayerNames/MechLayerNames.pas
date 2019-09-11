@@ -10,7 +10,8 @@
  03/07/2017  : mod to fix layer names output, why was import okay ??
  23/02/2018  : added MechLayer Pairs & colours, still loads old ini files.
  18/08/2019  : Layer colours above eMech16 are all cBlack so ignore.
- 28/08/2019  : Try improve import default filepath. 
+ 28/08/2019  : Try improve import default filepath.
+ 12/09/2019  : Layer tab display refresh without "flashing" & fix colours for all layers.
 
 ..................................................................................}
 const
@@ -21,6 +22,7 @@ var
     LayerObj_V7 : IPCB_LayerObject_V7;
     MechLayer   : IPCB_MechanicalLayer;
     MechPairs   : IPCB_MechanicalLayerPairs;
+    VerMajor    : WideString;
     FileName    : String;
     INIFile     : TIniFile;
     Flag        : Integer;
@@ -28,6 +30,14 @@ var
     i, j        : Integer;
 
 {.................................................................................}
+function Version(const dummy : boolean) : TStringList;
+begin
+    Result := TStringList.Create;
+    Result.Delimiter := '.';
+    Result.Duplicates := dupAccept;
+    Result.DelimitedText := Client.GetProductVersion;
+end;
+
 Procedure ExportMechLayerInfo;
 var
     SaveDialog  : TSaveDialog;
@@ -35,7 +45,9 @@ var
 begin
     Board := PCBServer.GetCurrentPCBBoard;
     if Board = nil then exit;
-    
+
+    VerMajor := Version(true).Strings(0);
+
     SaveDialog        := TSaveDialog.Create(Application);
     SaveDialog.Title  := 'Save Mech Layer Names to *.ini file';
     SaveDialog.Filter := 'INI file (*.ini)|*.ini';
@@ -70,9 +82,7 @@ begin
         IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'Show',    MechLayer.IsDisplayed[Board]);
         IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'Sheet',   MechLayer.LinkToSheet);
         IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'SLM',     MechLayer.DisplayInSingleLayerMode);
-// colour broken after eMech 16
-        if (i <= (MaxMechanicalLayer - eMechanical1 + 1)) then
-            IniFile.WriteString('MechLayer' + IntToStr(i), 'Color',   ColorToString(Board.LayerColor[MechLayer.V6_LayerID]) );
+        IniFile.WriteString('MechLayer' + IntToStr(i), 'Color',   ColorToString(Board.LayerColor[ML1]) );
     end;
 end;
 
@@ -141,13 +151,6 @@ begin
 
     end;
 
-    ResetParameters;
-    AddStringParameter('LayerName','Next');
-    RunProcess('PCB:SetCurrentLayer');
-
-    ResetParameters;
-    AddStringParameter('LayerName','Previous');
-    RunProcess('PCB:SetCurrentLayer');
-
+    Board.ViewManager_UpdateLayerTabs;
     ShowInfo('The names & colours assigned to layers (& mech pairs) have been updated.');
 end;
