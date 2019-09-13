@@ -6,9 +6,12 @@
 
  13/09/2019  BLM  v0.1  Cut&paste out of Footprint-SS-Fix.pas
  13/09/2019  BLM  v0.11 Holetype was converted as boolean..
+                  v0.12 Set units with const.
 
 }
 //...................................................................................
+const
+    Units = eMetric; //eImperial;
 
 Var
     CurrentLib : IPCB_Library;
@@ -17,7 +20,7 @@ Var
     Handle     : IPCB_Primitive;
     Rpt        : TStringList;
     FilePath   : WideString;
-   
+
 procedure SaveReportLog(FileExt : WideString, const display : boolean);
 var
     FileName     : TPCBString;
@@ -42,6 +45,7 @@ var
     PadCache     : TPadCache;
     Layer        : TLayer;
     NoOfPrims    : Integer;
+//    Units        : TUnit;
 
 begin
     CurrentLib := PCBServer.GetCurrentPCBLibrary;
@@ -51,6 +55,7 @@ begin
         Exit;
     End;
 
+//    Units := eImperial;
 
     // For each page of library is a footprint
     FPIterator := CurrentLib.LibraryIterator_Create;
@@ -83,9 +88,9 @@ begin
                 // ePadMode_LocalStack;       // top-mid-bottom stack
 
                 Rpt.Add('Layer        : ' + CurrentLib.Board.LayerName(Layer));
-                Rpt.Add('Pad.x        : ' + PadRight(CoordToMils(Pad.x),10)                + '  Pad.y       : ' + PadRight(CoordToMils(Pad.y),10) );
-                Rpt.Add('Pad offsetX  : ' + PadRight(CoordToMils(Pad.XPadOffset(Layer)),10) + '  Pad offsetY : ' + PadRight(CoordToMils(Pad.YPadOffset(Layer)),10) );
-                Rpt.Add('Holesize     : ' + CoordUnitToString(Pad.Holesize,eMetric));
+                Rpt.Add('Pad.x        : ' + PadLeft(CoordUnitToString(Pad.x,                 Units), 10) + '  Pad.y       : ' + PadLeft(CoordUnitToString(Pad.y,                 Units),10) );
+                Rpt.Add('Pad offsetX  : ' + PadLeft(CoordUnitToString(Pad.XPadOffset(Layer), Units), 10) + '  Pad offsetY : ' + PadLeft(CoordUnitToString(Pad.YPadOffset(Layer), Units),10) );
+                Rpt.Add('Holesize     : ' + PadLeft(CoordUnitToString(Pad.Holesize,          Units), 10) );
                 Rpt.Add('Holetype     : ' + IntToStr(Pad.Holetype));     // TExtendedHoleType
                 Rpt.Add('DrillType    : ' + IntToStr(Pad.DrillType));    // TExtendedDrillType
                 Rpt.Add('Plated       : ' + BoolToStr(Pad.Plated));
@@ -98,9 +103,9 @@ begin
                 Rpt.Add('Pad Pin Desc : ' + Pad.PinDescriptor);
 
                 Rpt.Add('Pad Mode     : ' + IntToStr(Pad.Mode));
-                Rpt.Add('Pad Stack Size Top(X,Y): (' + CoordUnitToString(Pad.TopXSize,eMetric) + ',' + CoordUnitToString(Pad.TopYSize,eMetric) + ')');
-                Rpt.Add('Pad Stack Size Mid(X,Y): (' + CoordUnitToString(Pad.MidXSize,eMetric) + ',' + CoordUnitToString(Pad.MidYSize,eMetric) + ')');
-                Rpt.Add('Pad Stack Size Bot(X,Y): (' + CoordUnitToString(Pad.BotXSize,eMetric) + ',' + CoordUnitToString(Pad.BotYSize,eMetric) + ')');
+                Rpt.Add('Pad Stack Size Top(X,Y): (' + CoordUnitToString(Pad.TopXSize,Units) + ',' + CoordUnitToString(Pad.TopYSize,Units) + ')');
+                Rpt.Add('Pad Stack Size Mid(X,Y): (' + CoordUnitToString(Pad.MidXSize,Units) + ',' + CoordUnitToString(Pad.MidYSize,Units) + ')');
+                Rpt.Add('Pad Stack Size Bot(X,Y): (' + CoordUnitToString(Pad.BotXSize,Units) + ',' + CoordUnitToString(Pad.BotYSize,Units) + ')');
 
             end;
 
@@ -126,8 +131,8 @@ begin
                 Pad.GetState_IsTenting_Top;
                 Pad.GetState_IsTenting_Bottom;
 
-                Rpt.Add('PEX  : ' + CoordUnitToString(PadCache.PasteMaskExpansion, eMetric) );
-                Rpt.Add('SMEX : ' + CoordUnitToString(PadCache.SolderMaskExpansion,eMetric) );
+                Rpt.Add('PEX  : ' + CoordUnitToString(PadCache.PasteMaskExpansion,  Units) );
+                Rpt.Add('SMEX : ' + CoordUnitToString(PadCache.SolderMaskExpansion, Units) );
             end;
 
             Handle := Iterator.NextPCBObject;
@@ -148,6 +153,8 @@ begin
 end;
 
 {
+TUnit = (eMetric, eImperial);
+
 TExtendedDrillType =(
     eDrilledHole,
     ePunchedHole,
