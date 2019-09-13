@@ -4,7 +4,8 @@
  from General\TextFileConvert.pas
  from Footprint-SS-Fix.pas 16/09/2017
 
- 13/09/2019  BLM  rev0.1  Cut&paste out of Footprint-SS-Fix.pas
+ 13/09/2019  BLM  v0.1  Cut&paste out of Footprint-SS-Fix.pas
+ 13/09/2019  BLM  v0.11 Holetype was converted as boolean..
 
 }
 //...................................................................................
@@ -85,11 +86,11 @@ begin
                 Rpt.Add('Pad.x        : ' + PadRight(CoordToMils(Pad.x),10)                + '  Pad.y       : ' + PadRight(CoordToMils(Pad.y),10) );
                 Rpt.Add('Pad offsetX  : ' + PadRight(CoordToMils(Pad.XPadOffset(Layer)),10) + '  Pad offsetY : ' + PadRight(CoordToMils(Pad.YPadOffset(Layer)),10) );
                 Rpt.Add('Holesize     : ' + CoordUnitToString(Pad.Holesize,eMetric));
-                Rpt.Add('Holetype     : ' + BoolToStr(Pad.Holetype));
-                Rpt.Add('DrillType    : ' + IntToStr(Pad.DrillType));
+                Rpt.Add('Holetype     : ' + IntToStr(Pad.Holetype));     // TExtendedHoleType
+                Rpt.Add('DrillType    : ' + IntToStr(Pad.DrillType));    // TExtendedDrillType
                 Rpt.Add('Plated       : ' + BoolToStr(Pad.Plated));
 
-                Rpt.Add('Pad Name     : ' + Pad.Name);         // should be designator / pin number
+                Rpt.Add('Pad Name     : ' + Pad.Name);                  // should be designator / pin number
                 Rpt.Add('Pad ID       : ' + Pad.Identifier);
                 Rpt.Add('Pad desc     : ' + Pad.Descriptor);
                 Rpt.Add('Pad Detail   : ' + Pad.Detail);
@@ -145,4 +146,19 @@ begin
     Rpt.Free;
 
 end;
+
+{
+TExtendedDrillType =(
+    eDrilledHole,
+    ePunchedHole,
+    eLaserDrilledHole,
+    ePlasmaDrilledHole
+);
+TExtendedHoleType= (
+    eRoundHole,
+    eSquareHole,
+    eSlotHole
+);
+
+}
 
