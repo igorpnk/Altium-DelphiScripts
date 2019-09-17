@@ -167,7 +167,7 @@ begin
         Result := GetWorkSpace.DM_FocusedProject.DM_PrimaryImplementationDocument.DM_FileName;
 end;
 
-procedure testform(dummy : boolean);      // test then Form events work by removing dummy
+procedure testform(dummy : boolean);      // test the Form events work by removing dummy parameter
 var
    FName : WideString;
 begin

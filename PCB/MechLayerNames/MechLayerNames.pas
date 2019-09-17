@@ -12,22 +12,31 @@
  18/08/2019  : Layer colours above eMech16 are all cBlack so ignore.
  28/08/2019  : Try improve import default filepath.
  12/09/2019  : Layer tab display refresh without "flashing" & fix colours for all layers.
+ 18/09/2019  : Versioncheck & set max mech layers for AD19 & later
+
+Can already iterate 1 to 64 mech layers in AD17! (see MechLayerNames-test.pas)
+ tbd: will it crash?
 
 ..................................................................................}
 const
-    NoColour = 'ncol';
+    NoColour          = 'ncol';
+    ADVersion19       = 19;
+    AD17MaxMechLayers = 32;     // scripting API has broken consts from TV6_Layer
+    AD19MaxMechLayers = 1024; 
+
 var
-    Board       : IPCB_Board;
-    LayerStack  : IPCB_LayerStack_V7;
-    LayerObj_V7 : IPCB_LayerObject_V7;
-    MechLayer   : IPCB_MechanicalLayer;
-    MechPairs   : IPCB_MechanicalLayerPairs;
-    VerMajor    : WideString;
-    FileName    : String;
-    INIFile     : TIniFile;
-    Flag        : Integer;
-    ML1, ML2    : integer;
-    i, j        : Integer;
+    Board         : IPCB_Board;
+    LayerStack    : IPCB_LayerStack_V7;
+    LayerObj_V7   : IPCB_LayerObject_V7;
+    MechLayer     : IPCB_MechanicalLayer;
+    MechPairs     : IPCB_MechanicalLayerPairs;
+    VerMajor      : WideString;
+    MaxMechLayers : integer;
+    FileName      : String;
+    INIFile       : TIniFile;
+    Flag          : Integer;
+    ML1, ML2      : integer;
+    i, j          : Integer;
 
 {.................................................................................}
 function Version(const dummy : boolean) : TStringList;
@@ -48,6 +57,10 @@ begin
 
     VerMajor := Version(true).Strings(0);
 
+    MaxMechLayers := AD17MaxMechLayers;
+    if (VerMajor >= ADVersion19) then 
+        MaxMechLayers := AD19MaxMechLayers;
+
     SaveDialog        := TSaveDialog.Create(Application);
     SaveDialog.Title  := 'Save Mech Layer Names to *.ini file';
     SaveDialog.Filter := 'INI file (*.ini)|*.ini';
@@ -65,14 +78,14 @@ begin
     LayerStack := Board.LayerStack_V7;
     MechPairs  := Board.MechanicalPairs;
 
-    for i := 1 to 32 do
+    for i := 1 to MaxMechLayers do
     begin
         ML1 := LayerUtils.MechanicalLayer(i);
         MechLayer := LayerStack.LayerObject_V7[ML1];
 
         IniFile.WriteString('MechLayer' + IntToStr(i), 'Name', Board.LayerName(ML1) );    //MechLayer.Name);
 
-        for j := 1 to 32 do
+        for j := 1 to MaxMechLayers do
         begin
             ML2 := LayerUtils.MechanicalLayer(j);
             if MechPairs.PairDefined(ML1, ML2) then
@@ -101,6 +114,12 @@ begin
     PCBSysOpts := PCBServer.SystemOptions;
     If PCBSysOpts = Nil Then exit;
 
+    VerMajor := Version(true).Strings(0);
+
+    MaxMechLayers := AD17MaxMechLayers;
+    if (VerMajor >= ADVersion19) then 
+        MaxMechLayers := AD19MaxMechLayers;
+
     OpenDialog        := TOpenDialog.Create(Application);
     OpenDialog.Title  := 'Import Mech Layer Names from *.ini file';
     OpenDialog.Filter := 'INI file (*.ini)|*.ini';
@@ -115,7 +134,7 @@ begin
     LayerStack := Board.LayerStack_V7;
     MechPairs  := Board.MechanicalPairs;
 
-    For i := 1 To 32 do
+    For i := 1 To MaxMechLayers do
     begin
         ML1 := LayerUtils.MechanicalLayer(i);
         MechLayer := LayerStack.LayerObject_V7[ML1];

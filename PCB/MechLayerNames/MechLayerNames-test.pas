@@ -177,6 +177,7 @@ Layer2 : TLayer;
 End;
 }
 //            MechPair ;   //  .Layer1;                      // does NOT work
+//            MechPair(Layer1);
 //            Layer := MechPair.GetTypeInfoCount(0);         // __TMechanicalLayerPair__Wrapper
 //            Layer := MechPair;
 

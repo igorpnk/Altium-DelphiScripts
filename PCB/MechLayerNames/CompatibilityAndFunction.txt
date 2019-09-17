@@ -1,10 +1,13 @@
 MechLayerNames.pas
 Altium version compatibility & functionality summary.
+Script checks the Altium version & picks a suitable MaxMechLayers count (1 to n).
 
 AD17, AD18
 PcbDoc: 32 max mechanical layers.
 
 Script: 1 - 32 mechanical layers supported (name, enabled, colour, mech pairs)
+
+Iterating from 1 to 64 mechlayers does NOT cause any problems in AD17!
 
  
 AD19
@@ -24,7 +27,13 @@ user confirms/checks result thoroughly.
 Why is there a problem:
 Scripting API appears to be 5 years old.
 There are multiple existing alternative interfaces for Layers, all have some problems.
-Most fail after eMechanical 16 or return values that crash other interfaces.
+TV6_Layer can only work to eMech16 (=72)
+Some Interfaces fail after eMechanical 16 &/or return no values.
+GetObjectAtCursor() & GetObjectAtXYAskUserIfAmbiguous() only return for TV6_Layer sets
+
+TV7_Layer appears to work above eMech26 (act. 82 Via Holes) but returns large numbers (eMech17=67108881).
+These large numbers appear workable.
+
 There is no support in LayerStack interface for LayerClass = eLayerClass_Mechanical, just empty..
 
 
