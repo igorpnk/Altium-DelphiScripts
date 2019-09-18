@@ -8,7 +8,8 @@ Added DemoAddNewParameters proc to show how to add parameters from ParameterList
 
 Author BL Miller
 Date
-18/09/2019 : v0.1 Initial POC .. seems to work
+18/09/2019 : v0.1  Initial POC .. seems to work
+           : v0.11 Test the Import file has a valid Section before reading it!
 }
 
 const
@@ -21,7 +22,6 @@ Var
     IniFile      : TIniFile;
     Flag         : Integer;
     VersionMajor : WideString;
-    ExtParas     : IExternalParameter;
 
 function Version(const dummy : boolean) : TStringList;
 begin
@@ -81,7 +81,7 @@ begin
 // or
     Parameter := ParameterList.GetState_ParameterByName(PName);      // this creates the TParameter object
     Parameter.Name; Parameter.Value;
-// bad for indexing because that returns a pointer (DelphiScript is hopeless with pointers)
+// bad for indexing .Items(i) because that returns a pointer (DelphiScript is hopeless with pointers)
 
 // StringList with delimited input & name value tuples.
     ParaSList := TStringList.Create;
@@ -169,7 +169,7 @@ end;
 procedure ImportPrjParas(const Prj : IProject, const FileName : WideString);
 var
     TuplesList : TStringList;
-    ParameterList : TParameterList;   // need to instantiate parameter.
+    ParameterList : TParameterList;   // need to instantiate Parameter.
     Parameter  : TParameter;
     OrigValue  : WideString;
     I          : integer;
@@ -189,10 +189,11 @@ begin
     ParameterList.SetState_FromString('dumb=dumber');
     Parameter := ParameterList.GetState_ParameterByName('dumb');
 
-//    Tuple := IniFile.ReadString(TopLevelKey, '', '' );
-//    IniFile.ReadSection(TopLevelKey, TuplesList);
+//    Tuple := IniFile.ReadString(SectionName, VarName, DefaultValue );
+//    IniFile.ReadSection(TopLevelKey, TuplesList);   // CDT block
 
-    IniFile.ReadSectionValues( TopLevelKey, TuplesList);
+    if IniFile.SectionExists(TopLevelKey) then
+        IniFile.ReadSectionValues(TopLevelKey, TuplesList);
     IniFile.Free;
 
     NewParameterCount := 0;
@@ -221,11 +222,16 @@ begin
             ShowMessage('Added new para ' + Parameter.Name + '  with val= ' + Parameter.Value);
         end;
     end;
-    ShowMessage('Existing Parameter Value Change Count : ' + PadRight(IntToStr(ChangeValueCount), 3));
-    if not (NewParameterCount = 0) then
-        ShowMessage('New Parameter(s) Added Count : ' + PadRight(IntToStr(NewParameterCount), 3))
-    else
-        ShowMessage('ZERO New Parameters Added');
+
+    if (TuplesList.Count > 0) then
+    begin
+        ShowMessage('Existing Parameter Value Change Count : ' + PadRight(IntToStr(ChangeValueCount), 3));
+        if not (NewParameterCount = 0) then
+            ShowMessage('New Parameter(s) Added Count : ' + PadRight(IntToStr(NewParameterCount), 3))
+        else
+            ShowMessage('ZERO New Parameters Added');
+    end
+    else ShowMessage('NO Parameter Section found !');
 
     TuplesList.Clear;
     Tupleslist.Free;
@@ -283,15 +289,12 @@ begin
     ImportPrjParas(Prj, FileName);
 end;
 
-
-// ExtParas := IExternalParameter.DM_GetName('OriginalDate');
 {
-The IExternalParameter interface defines the external parameter object.
-Interface Methods
-Method                                  Description
-Function  DM_GetSection : WideString;   Returns the Section string of the external parameter interface.
-Function  DM_GetName : WideString;  Returns the Name string of the external parameter interface.
-Function  DM_GetValue : WideString;     Returns the Value string of the external parameter interface.
-Procedure DM_SetValue(AValue : WideString);     Sets the new value string for this external parameter.
-}
+TiniFiles
+Each of the Read routines takes three parameters.
+ - first identifies the section of the INI file.
+ - second identifies the value you want to read
+ - third is a default value in case the section or value doesn't exist in the INI file.
+Similarly, the Write routines will create the section and/or value if they do not exist.
+
 
