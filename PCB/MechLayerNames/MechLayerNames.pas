@@ -13,6 +13,9 @@
  28/08/2019  : Try improve import default filepath.
  12/09/2019  : Layer tab display refresh without "flashing" & fix colours for all layers.
  18/09/2019  : Versioncheck & set max mech layers for AD19 & later
+ 19/09/2019  : Export: Limit continuous sequential layer export listing to below AllLayerDataMax
+               Import: test the Layer Section Key exists.
+
 
 Can already iterate 1 to 64 mech layers in AD17! (see MechLayerNames-test.pas)
  tbd: will it crash?
@@ -22,7 +25,8 @@ const
     NoColour          = 'ncol';
     ADVersion19       = 19;
     AD17MaxMechLayers = 32;     // scripting API has broken consts from TV6_Layer
-    AD19MaxMechLayers = 1024; 
+    AD19MaxMechLayers = 1024;
+    AllLayerDataMax   = 16;     // after this mech layer index only report the actual active layers.
 
 var
     Board         : IPCB_Board;
@@ -68,12 +72,14 @@ begin
     SaveDialog.FileName := ChangeFileExt(FileName, '');
 
     Flag := SaveDialog.Execute;
-    if (not Flag) then exit;
+    if (Flag = 0) then exit;
 
     // Get file & set extension
     FileName := SaveDialog.FileName;
     FileName := ChangeFileExt(FileName, '.ini');
     IniFile := TIniFile.Create(FileName);
+
+    BeginHourGlass(crHourGlass);
 
     LayerStack := Board.LayerStack_V7;
     MechPairs  := Board.MechanicalPairs;
@@ -83,20 +89,24 @@ begin
         ML1 := LayerUtils.MechanicalLayer(i);
         MechLayer := LayerStack.LayerObject_V7[ML1];
 
-        IniFile.WriteString('MechLayer' + IntToStr(i), 'Name', Board.LayerName(ML1) );    //MechLayer.Name);
-
-        for j := 1 to MaxMechLayers do
+        if (i <= AllLayerDataMax) or MechLayer.MechanicalLayerEnabled then
         begin
-            ML2 := LayerUtils.MechanicalLayer(j);
-            if MechPairs.PairDefined(ML1, ML2) then
-                IniFile.WriteString('MechLayer' + IntToStr(i), 'Pair', Board.LayerName(ML2) );
+            IniFile.WriteString('MechLayer' + IntToStr(i), 'Name', Board.LayerName(ML1) );    //MechLayer.Name);
+            for j := 1 to MaxMechLayers do
+            begin
+                ML2 := LayerUtils.MechanicalLayer(j);
+                if MechPairs.PairDefined(ML1, ML2) then
+                    IniFile.WriteString('MechLayer' + IntToStr(i), 'Pair', Board.LayerName(ML2) );
+            end;
+            IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'Enabled', MechLayer.MechanicalLayerEnabled);
+            IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'Show',    MechLayer.IsDisplayed[Board]);
+            IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'Sheet',   MechLayer.LinkToSheet);
+            IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'SLM',     MechLayer.DisplayInSingleLayerMode);
+            IniFile.WriteString('MechLayer' + IntToStr(i), 'Color',   ColorToString(Board.LayerColor[ML1]) );
         end;
-        IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'Enabled', MechLayer.MechanicalLayerEnabled);
-        IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'Show',    MechLayer.IsDisplayed[Board]);
-        IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'Sheet',   MechLayer.LinkToSheet);
-        IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'SLM',     MechLayer.DisplayInSingleLayerMode);
-        IniFile.WriteString('MechLayer' + IntToStr(i), 'Color',   ColorToString(Board.LayerColor[ML1]) );
     end;
+    IniFile.Free;
+    EndHourGlass;
 end;
 
 
@@ -126,11 +136,12 @@ begin
 //    OpenDialog.InitialDir := ExtractFilePath(Board.FileName);
     OpenDialog.FileName := '';
     Flag := OpenDialog.Execute;
-    if (not Flag) then exit;
+    if (Flag = 0) then exit;
 
     FileName := OpenDialog.FileName;
     IniFile := TIniFile.Create(FileName);
 
+    BeginHourGlass(crHourGlass);
     LayerStack := Board.LayerStack_V7;
     MechPairs  := Board.MechanicalPairs;
 
@@ -139,37 +150,42 @@ begin
         ML1 := LayerUtils.MechanicalLayer(i);
         MechLayer := LayerStack.LayerObject_V7[ML1];
 
-        MechLayer.Name := IniFile.ReadString('MechLayer' + IntToStr(i), 'Name',  '');
-        MPairLayer     := IniFile.ReadString('MechLayer' + IntToStr(i), 'Pair',  '');
-
-    // remove existing mechpairs & add new ones.
-    // potentially new layer names in this file are of mech pair; only check parsed ones.
-        for j := 1 to (i -1) do
+        if IniFile.SectionExists('MechLayer' + IntToStr(i)) then
         begin
-            ML2 := LayerUtils.MechanicalLayer(j);
-            // remove pair including backwards ones !
-            if MechPairs.PairDefined(ML2, ML1) then
-                MechPairs.RemovePair(ML2, ML1);
-            if MechPairs.PairDefined(ML1, ML2) then
-                MechPairs.RemovePair(ML1, ML2);
+            MechLayer.Name := IniFile.ReadString('MechLayer' + IntToStr(i), 'Name', 'eMech' + IntToStr(i));
+            MPairLayer     := IniFile.ReadString('MechLayer' + IntToStr(i), 'Pair',  '');
 
-            MechLayer2 := LayerStack.LayerObject_V7[ML2];
-            if (MPairLayer = MechLayer2.Name) and not MechPairs.PairDefined(ML2, ML1) then
-                MechPairs.AddPair(ML2, ML1);
-        end;
+//    remove existing mechpairs & add new ones.
+//    potentially new layer names in this file are of mech pair; only check parsed ones.
+            for j := 1 to (i - 1) do
+            begin
+                ML2 := LayerUtils.MechanicalLayer(j);
+//           remove pair including backwards ones !
+                if MechPairs.PairDefined(ML2, ML1) then
+                    MechPairs.RemovePair(ML2, ML1);
+                if MechPairs.PairDefined(ML1, ML2) then
+                    MechPairs.RemovePair(ML1, ML2);
+//           add pairs back
+                MechLayer2 := LayerStack.LayerObject_V7[ML2];
+                if (MPairLayer = MechLayer2.Name) and not MechPairs.PairDefined(ML2, ML1) then
+                    MechPairs.AddPair(ML2, ML1);
+            end;
+//    allow turn Off -> ON only, default Off for missing entries
+            If Not MechLayer.MechanicalLayerEnabled then
+                MechLayer.MechanicalLayerEnabled := IniFile.ReadBool('MechLayer' + IntToStr(i), 'Enabled', False);
 
-        If Not MechLayer.MechanicalLayerEnabled then
-            MechLayer.MechanicalLayerEnabled := IniFile.ReadBool('MechLayer' + IntToStr(i), 'Enabled', True);
+            MechLayer.LinkToSheet              := IniFile.ReadBool  ('MechLayer' + IntToStr(i), 'Sheet', False);
+            MechLayer.DisplayInSingleLayerMode := IniFile.ReadBool  ('MechLayer' + IntToStr(i), 'SLM',   False);
+            MechLayer.IsDisplayed[Board]       := IniFile.ReadBool  ('MechLayer' + IntToStr(i), 'Show',  True);
+            LColour                            := IniFile.ReadString('MechLayer' + IntToStr(i), 'Color', NoColour);
+            if LColour <> NoColour then
+                PCBSysOpts.LayerColors[ML1] := StringToColor( LColour);
 
-        MechLayer.LinkToSheet              := IniFile.ReadBool('MechLayer' + IntToStr(i), 'Sheet', False);
-        MechLayer.DisplayInSingleLayerMode := IniFile.ReadBool('MechLayer' + IntToStr(i), 'SLM',   False);
-        MechLayer.IsDisplayed[Board]       := IniFile.ReadBool('MechLayer' + IntToStr(i), 'Show',  True);
-        LColour                            := IniFile.ReadString('MechLayer' + IntToStr(i), 'Color', NoColour);
-        if LColour <> NoColour then
-            PCBSysOpts.LayerColors[ML1] := StringToColor( LColour);
-
+        end; // section exists
     end;
 
+    EndHourGlass;
+    IniFile.Free;
     Board.ViewManager_UpdateLayerTabs;
     ShowInfo('The names & colours assigned to layers (& mech pairs) have been updated.');
 end;
