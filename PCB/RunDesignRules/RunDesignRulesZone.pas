@@ -8,6 +8,7 @@ Author: BL Miller
 19/08/2019 : first cut POC
 20/08/2019 : implemented choose rectange & got DRCmarkers to display.
 21/08/2019 : binary rule loop iterating was creating duplicate violations.
+19/09/2019 : test only the dominant Rule of each RuleKind.
 
 tbd: problems with violation descriptions
 }
@@ -131,12 +132,31 @@ begin
     Board.BoardIterator_Destroy(Iterator);
 end;
 
+function GetRuleKinds(RulesList : TObjectList) : TStringList;
+var
+    Rule     : IPCB_Rule;
+    RuleKind : TRuleKind;
+    I        : integer;
+begin
+    Result := TStringList.Create;
+    Result.Sorted := true;                  // required for dupInore
+    Result.Duplicates := dupIgnore;         // ignores attempt add dups IF sorted!   alt. dupAccept
+    for I := 0 to (RulesList.Count - 1) do
+    begin
+        Rule := RulesList.Items(I);
+        RuleKind := Rule.RuleKind;
+//        if Result.IndexOf(RuleKind) = -1 then
+        Result.Add(RuleKind);
+    end;
+end;
+
 procedure ShowViolations(x1, y1, x2, y2 : TCoord);
 var
     SIterator  : IPCB_SpatialIterator;
     Iterator   : IPCB_BoardIterator;
     Rule       : IPCB_Rule;
     RuleKind   : TRuleKind;
+    RKindList  : TStringList;
     RulesList  : TObjectList;
     Primitives : TObjectList;
     Violation  : IPCB_Violation;
@@ -150,6 +170,7 @@ begin
     Rpt        := TStringList.Create;
     Primitives := TObjectList.Create;
     RulesList  := TObjectList.Create;
+//    RKindList     := TStringList.Create;
 
 // collection of all primitive objects at cursor.
     SIterator := Board.SpatialIterator_Create;
@@ -157,19 +178,22 @@ begin
     SIterator.AddFilter_ObjectSet(AllPrimitives);
     SIterator.AddFilter_Area(x1, y1, x2, y2);
 
+    Rpt.Add('Selected Objects for Design Rule Checking');
+    Rpt.Add('prim objId     |  net name    |  layer ');
+
     Prim2 := SIterator.FirstPCBObject;
     while Prim2 <> Nil do
     begin
         if Primitives.IndexOf(Prim2) = -1 then
         begin
             Primitives.Add(Prim2);
-            Rpt.Add('prim : ' + Prim2.ObjectIDString + '  layer : ' + IntToStr(Prim2.Layer));
+            Rpt.Add(PadRight(Prim2.ObjectIDString, 15) + StringOfChar(' ', 17) + Layer2String(Prim2.Layer));
         end;
         if Prim2.InNet then
             if Primitives.IndexOf(Prim2.Net) = -1 then
             begin
                 Primitives.Add(Prim2.Net);
-                Rpt.Add('prim : ' + Prim2.Net.ObjectIDString + '  net : ' + Prim2.Net.Name + '  layer : ' + IntToStr(Prim2.Layer));
+                Rpt.Add(PadRight(Prim2.Net.ObjectIDString,15) + ' ' + PadRight(Prim2.Net.Name, 15) + ' ' + Layer2String(Prim2.Layer));
             end;
         Prim2 := SIterator.NextPCBObject;
     end;
@@ -177,30 +201,34 @@ begin
     Prim2 := Prim1;
 
     RulesList := GetRulesfromBoard(Board, cAllRules);
+    RKindList := GetRuleKinds(RulesList);
 
     // clear existing violations
     Client.SendMessage('PCB:ResetAllErrorMarkers', '', 255, Client.CurrentView);
     Rpt.Add('');
-    Rpt.Add('Cleared existing DRC markers');
+    Rpt.Add('Existing DRC markers cleared');
     Rpt.Add('');
+    Rpt.Add('Violations from Design Rule Checking');
     Rpt.Add('   prim1:    prim2:       Violation Name:         Desc.:                  RuleName:     RuleType: ');
 
-    for K := 0 to (RulesList.Count - 1) do
+    for K := 0 to (RKindList.Count - 1) do
     begin
-        Rule := RulesList.Items(K);
+        RuleKind := RKindList.Strings(K);
         for I := 0 to (Primitives.Count - 1) do
         begin
             Prim1 := Primitives.Items(I);
-            //Rule := Board.FindDominantRuleForObject(Prim1, RuleKind);
+            Rule := Board.FindDominantRuleForObject(Prim1, RuleKind);
+            if Rule <> nil then
             if Rule.IsUnary and Rule.Enabled then
             begin
-                Rule.CheckUnaryScope(Prim1);
-                Rule.Scope1Includes(Prim1);
+//                Rule.CheckUnaryScope(Prim1);
+//                Rule.Scope1Includes(Prim1);
                 Violation := Rule.ActualCheck(Prim1, nil);
                 if Violation <> nil then
                 begin
                     Board.AddPCBObject(Violation);
-                    ViolDesc := Copy(Violation.Description, 0, 60);
+                    ViolDesc := Violation.Description;
+                    ViolDesc := Copy(ViolDesc, 0, 60);
                     //Setlength(ViolDesc,40);
                     Rpt.Add('U  ' + PadRight(Prim1.ObjectIDString, 10) + '            ' + PadRight(Violation.Name, 20) + ' '
                             + PadRight(ViolDesc, 60) + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
@@ -213,17 +241,18 @@ begin
             for J := (I + 1) to (Primitives.Count - 1) do
             begin
                 Prim2 := Primitives.Items(J);
-                //Rule := Board.FindDominantRuleForObjectPair(Prim1, Prim2, RuleKind);
+                Rule := Board.FindDominantRuleForObjectPair(Prim1, Prim2, RuleKind);
+                if Rule <> nil then
                 if (not Rule.IsUnary) and Rule.Enabled then
                 begin
 //                  Rule.CheckBinaryScope(Prim1, Prim2);
 //                  Rule.Scope2Includes(Prim2);
-                // Violation := PCBServer.PCBObjectFactory(eViolationObject, eNoDimension, eCreate_Default);
                     Violation := Rule.ActualCheck(Prim1, Prim2);
                     if Violation <> nil then
                     begin
                         Board.AddPCBObject(Violation);
-                        ViolDesc := Copy(Violation.Description, 0, 60;
+                        ViolDesc := Violation.Description;
+                        ViolDesc := Copy(ViolDesc, 0, 60);
                         //SetLength(ViolDesc,40);
                         Rpt.Add('B  '+ PadRight(Prim1.ObjectIDString, 10) + ' ' + PadRight(Prim2.ObjectIDString, 10) + ' ' + PadRight(Violation.Name, 20)
                                 + ' ' + PadRight(ViolDesc, 60) + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
@@ -239,17 +268,18 @@ begin
 
     Primitives.Destroy;
     RulesList.Destroy;
+    RKindList.Free;
 
     EndHourGlass;
     Board.ViewManager_FullUpdate;
-    Client.SendMessage('PCB:Zoom', 'Action=Redraw' , 255, Client.CurrentView);
+//    Client.SendMessage('PCB:Zoom', 'Action=Redraw' , 255, Client.CurrentView);
 
     Rpt.Insert(0,'Rule Violations for Selected Object' + ExtractFileName(Board.FileName) + ' document.');
     Rpt.Insert(1,'----------------------------------------------------------');
     Rpt.Insert(2,'');
 
     // Display the Rules report
-    FileName := ExtractFilePath(Board.FileName) + ChangefileExt(ExtractFileName(Board.FileName),'') + '-ObjViolateReport.txt';
+    FileName := ExtractFilePath(Board.FileName) + ChangefileExt(ExtractFileName(Board.FileName),'') + '-ObjViolateRpt.txt';
     Rpt.SaveToFile(Filename);
     Rpt.Free;
 
@@ -271,7 +301,7 @@ begin
     Board := PCBServer.GetCurrentPCBBoard;
     if Board = Nil then exit;
 
-    if Board.ChooseRectangleByCorners('Zone First Corner','Zone Opposite Corner',x,y,x2,y2) then
+    if Board.ChooseRectangleByCorners('Zone First Corner ','Zone Opposite Corner ',x,y,x2,y2) then
         ShowViolations(x, y, x2, y2);
 end;
 
@@ -290,12 +320,13 @@ begin
     Prim1 := nil;
 
     if Board.GetState_SelectecObjectCount > 0 then
+    begin
         Prim1 := Board.SelectecObject(0);
         x := Prim1.X;
         y := prim1.Y;
-    if not InSet(Prim1.ObjectId, SetObjects) then Prim1 := nil;
-
-    msg := 'Select Object for Rules Checking';
+        if not InSet(Prim1.ObjectId, SetObjects) then Prim1 := nil;
+    end;
+    msg := 'Select Object for Design Rules Check ';
     While not (Prim1 <> Nil) do
     begin
         if Board.ChooseLocation(x, y, msg) then  // false = ESC Key is pressed
@@ -308,8 +339,11 @@ begin
     if (Prim1 <> cESC) and (Prim1 <> eNoObject) then
     begin
         MaxGap := MaxGapfromRules(Board);
-        MaxGap := MaxGap * 1.05;
+        MaxGap := MaxGap * 1.2;    // 20% more
         ShowViolations(x - MaxGap, y + MaxGap, x + MaxGap, y - MaxGap);
      end;
 end;
+
+
+// Violation := PCBServer.PCBObjectFactory(eViolationObject, eNoDimension, eCreate_Default);
 
