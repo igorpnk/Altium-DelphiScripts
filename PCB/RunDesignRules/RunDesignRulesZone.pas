@@ -10,6 +10,7 @@ Author: BL Miller
 21/08/2019 : binary rule loop iterating was creating duplicate violations.
 19/09/2019 : test only the dominant Rule of each RuleKind.
 20/09/2019 : Ensure all child objects of "Group objects" i.e. component are collected.
+             Confirm continue with multiples of n const violations
 
 tbd: problems with violation descriptions
 
@@ -19,10 +20,11 @@ consider:
 }
 
 const
-    OpenReport  = true;
-    FocusReport = false;  
-    cESC        = -1;
-    cAllRules   = -1;
+    OpenReport       = true;      // not working
+    FocusReport      = false;
+    ErrorCountPrompt = 20;     // modulus this confirm dialog
+    cESC      = -1;
+    cAllRules = -1;
     cAltKey   = 1;
     cShiftKey = 2;
     cCntlKey  = 3;
@@ -38,6 +40,7 @@ var
     Prim2          : IPCB_Primitive;
     KeySet         : TObjectSet;    // keyboard key modifiers <alt> <shift> <cntl>
     VCount         : integer;
+    dlgResult      : boolean;   // integer for cancel version FFS
 
 function RuleKindToString (const ARuleKind : TRuleKind) : String;
 // more failings of API
@@ -223,6 +226,7 @@ var
 //    BR         : TCoordRect;
     MaxGap     : single;
     I, J, K    : integer;
+    GetOutOfLoops : boolean;
 
 begin
     BeginHourGlass(crHourGlass);
@@ -280,6 +284,7 @@ begin
     Rpt.Add('   prim1:    prim2:       Violation Name:         Desc.:                  RuleName:              RuleType: ');
 
     VCount := 0;
+    GetOutOfLoops := false;
 
     for K := 0 to (RKindList.Count - 1) do
     begin
@@ -335,8 +340,17 @@ begin
                     end;
                 end;
             end;  // J
+
+            if (VCount > 0) and ((VCount mod ErrorCountPrompt) = 0) then
+            begin
+                dlgResult := ConfirmNoYesWithCaption('Lots of Violations ' + IntToStr(VCount), 'Continue ? ');
+                BeginHourGlass(crHourGlass);
+                if not dlgresult then GetOutOfLoops := true;
+            end;
+            if GetOutOfLoops then break;
         end;   // I
-    end;
+        if GetOutOfLoops then break;
+    end;    // K
 
     Primitives.Destroy;
     RulesList.Destroy;
@@ -345,7 +359,7 @@ begin
     EndHourGlass;
     Board.ViewManager_FullUpdate;
 //    Client.SendMessage('PCB:Zoom', 'Action=Redraw' , 255, Client.CurrentView);
-    if VCount =0 then ShowMessage('NO Violations Found ');
+    if VCount = 0 then ShowMessage('NO Violations Found ');
 end;
 
 procedure StartReport(Board : IPCB_Board);
