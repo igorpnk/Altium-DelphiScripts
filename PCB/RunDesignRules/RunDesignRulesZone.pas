@@ -17,8 +17,9 @@ Author: BL Miller
              Confirm continue with multiples of n const violations
 24/09/2019 : Add modifier keys to change search area size & clear previous violation
 24/09/2019 : FindDominantRuleForObject is completely wrong; missing key net errors.
+25/09/2019 : CheckUnary/BinaryScope is fastest & no false positives or missing errors.
 
-tbd: problems with violation descriptions
+tbd: magic speed up
 
 consider:
 -  not using SpatialIterator (non group)
@@ -259,6 +260,7 @@ var
     MaxGap     : single;
     I, J, K, R : integer;
     GetOutOfLoops : boolean;
+    DateTime      : TDateTime;
 
 begin
     BeginHourGlass(crHourGlass);
@@ -321,6 +323,9 @@ begin
     RulesList := GetRulesfromBoard(Board, cAllRules);
     RKindList := GetRuleKinds(RulesList);
     Rpt.Add('');
+    DateTime := GetTime;
+    Rpt.Add(TimeToStr(DateTime));
+
 //    Rpt.Add('Existing DRC markers cleared');
 //    Rpt.Add('');
     Rpt.Add('Violations from Design Rule Checking');
@@ -335,6 +340,11 @@ begin
         for R := 0 to (RulesList.Count - 1 ) do
         begin
             Rule := RulesList.Items(R);
+
+//      both below is wrong & prevents all rules being used
+//          Rule := Board.FindDominantRuleForObject(Prim1, RuleKind);   // this is wrong !
+//          Rule := Board.FindDominantRuleForObjectPair(Prim1, Prim2, RuleKind);
+
             if Rule.RuleKind = RuleKind then
             begin
                 if Rule.Enabled then
@@ -342,11 +352,10 @@ begin
                     for I := 0 to (Primitives.Count - 1) do
                     begin
                         Prim1 := Primitives.Items(I);
-//              Rule := Board.FindDominantRuleForObject(Prim1, RuleKind);   // this is wrong !
-//                        Rule.CheckUnaryScope(Prim1);
-//                        Rule.Scope1Includes(Prim1);
                         Violation := nil;
                         if Rule.IsUnary then
+                        if  Rule.CheckUnaryScope(Prim1) then      // required to avoid false positives
+//                        if Rule.Scope1Includes(Prim1) then      // no diff & no faster!
                             Violation := Rule.ActualCheck(Prim1, nil);
                         if Violation <> nil then
                         begin
@@ -364,11 +373,10 @@ begin
                         for J := (I + 1) to (Primitives.Count - 1) do
                         begin
                             Prim2 := Primitives.Items(J);
-//                  Rule := Board.FindDominantRuleForObjectPair(Prim1, Prim2, RuleKind);
-//                            Rule.CheckBinaryScope(Prim1, Prim2);
-//                            Rule.Scope2Includes(Prim2);
                             Violation := nil;
                             if (not Rule.IsUnary) then
+                            if Rule.CheckBinaryScope(Prim1, Prim2) then    // required to avoid false positives
+//                            if Rule.Scope2Includes(Prim2) then           // no diff & no faster!
                                 Violation := Rule.ActualCheck(Prim1, Prim2);
                             if Violation <> nil then
                             begin
@@ -402,7 +410,8 @@ begin
     Primitives.Destroy;
     RulesList.Destroy;
     RKindList.Free;
-
+    DateTime := GetTime;
+    Rpt.Add(TimeToStr(DateTime));
     EndHourGlass;
 end;
 
