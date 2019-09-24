@@ -1,8 +1,12 @@
 { RunDesignRulesZone.pas
   DocKind: PcbDoc
   Summary: Two call methods, object & rectangular area
-  Method:  Interate the rules in board over an object collection
+  Method:  Interate the rules in board over an object collection point or rectangular selection
            Generate DRCmarkers & log file.
+
+Modifier Keys at pick click (last cnr for rect area):
+<shift> == smaller search size ~90% (clearance)
+<cntl>  == clears last DRC (object pick mode only)
 
 Author: BL Miller
 19/08/2019 : first cut POC
@@ -11,6 +15,8 @@ Author: BL Miller
 19/09/2019 : test only the dominant Rule of each RuleKind.
 20/09/2019 : Ensure all child objects of "Group objects" i.e. component are collected.
              Confirm continue with multiples of n const violations
+24/09/2019 : Add modifier keys to change search area size & clear previous violation
+24/09/2019 : FindDominantRuleForObject is completely wrong; missing key net errors.
 
 tbd: problems with violation descriptions
 
@@ -28,6 +34,8 @@ const
     cAltKey   = 1;
     cShiftKey = 2;
     cCntlKey  = 3;
+    cTouch    = 1;            // not used; for alt to spatialiterator
+    cInside   = 2;
 
 var
     Board          : IPCB_Board;
@@ -196,7 +204,7 @@ begin
     Result := CheckPosRectCoord(Result);
 end;
 
-procedure AddPrimAndNetToList(Prim : IPCB_Primitive, var Primitives : TObjectList); 
+procedure AddPrimAndNetToList(Prim : IPCB_Primitive, var Primitives : TObjectList);
 begin
     if Primitives.IndexOf(Prim2) = -1 then
     begin
@@ -211,39 +219,70 @@ begin
         end;
 end;
 
-procedure ShowViolations(BR : TCoordRect);   // x1, y1, x2, y2
+function PointInRect(P : TPoint, Rect : TCoordRect) : boolean;
+begin
+    Result := (P.X >= Rect.X1) and (P.X <= Rect.X2) and (P.Y >= Rect.Y1) and (P.Y <= Rect.Y2);
+end;
+
+// potential alt fn to spatial     DNW yet
+function CheckObjInsideBR(Prim : IPCB_Object, BR2 : TCoordRect, const AllInside : integer) : boolean;
+var
+    BRO      : TCoordRect;
+begin
+    Result := false;
+    BRO := Prim.BoundingRectangle;
+    if AllInside = cInside then  // obj inside BR box
+        Result := (BRO.X1 >= BR2.X1) and (BRO.X2 <= BR2.X2) and (BRO.Y1 >= BR2.Y1) and (BRO.Y2 <= BR2.Y2);
+    if AllInside = cTouch then
+    begin   // any cnr of BR box inside Obj
+        Result :=                    PointInRect(Point(BR2.X1, BR2.Y1), BRO);
+        if not Result then Result := PointInRect(Point(BR2.X2, BR2.Y1), BRO);
+        if not Result then Result := PointInRect(Point(BR2.X1, BR2.Y2), BRO);
+        if not Result then Result := PointInRect(Point(BR2.X2, BR2.Y2), BRO);
+    end;
+end;
+
+procedure ShowViolations(BR : TCoordRect, const AllInside : integer);   // x1, y1, x2, y2
 var
     SIterator  : IPCB_SpatialIterator;
+    BIterator  : IPCB_BoardIterator;
     GIterator  : IPCB_GroupIterator;
     Rule       : IPCB_Rule;
     RuleKind   : TRuleKind;
     RKindList  : TStringList;
     RulesList  : TObjectList;
     Comp       : IPCB_Component;
+
     Primitives : TObjectList;
     Violation  : IPCB_Violation;
     ViolDesc   : WideString;
-//    BR         : TCoordRect;
     MaxGap     : single;
-    I, J, K    : integer;
+    I, J, K, R : integer;
     GetOutOfLoops : boolean;
 
 begin
     BeginHourGlass(crHourGlass);
     BR := CheckPosRectCoord(BR);
     MaxGap := MaxGapfromRules(Board, MkSet(eRule_Clearance));
-    MaxGap := MaxGap * 1.1;    // 10% more
 
-//   if InSet(cShiftKey, KeySet) then
-//   if (BRect.X1 < x) and (BRect.X2 > x) and  (BRect.Y1 < y) and (BRect.Y2 > y) then
+    if not InSet(cShiftKey, KeySet) then
+        MaxGap := MaxGap * 1.1;    // 10% more
+
+// for alt method not using spatial iterator
+//    BR :=  RectToCoordRect(Rect(BR.x1 - MaxGap, BR.y2 + MaxGap, BR.x2 + MaxGap, BR.y1 - MaxGap) );     // L R T B
+
+    if InSet(cCntlKey, KeySet) then
+        Client.SendMessage('PCB:ResetAllErrorMarkers', '', 255, Client.CurrentView);
 
     Primitives := TObjectList.Create;
     RulesList  := TObjectList.Create;
 
 // collection of all primitive objects at cursor.
-    SIterator := Board.SpatialIterator_Create;   // excludes Group (Component & dimension)!
+//    BIterator := Board.BoardIterator_Create;
+    SIterator := Board.SpatialIterator_Create;
     SIterator.AddFilter_LayerSet(AllLayers);
-    SIterator.AddFilter_ObjectSet(AllPrimitives);
+    SIterator.AddFilter_ObjectSet(AllPrimitives);      //   AllPrimitives is everything.
+//    BIterator.AddFilter_Method(eProcessAll);
     SIterator.AddFilter_Area(BR.x1 - MaxGap, BR.y2 + MaxGap, BR.x2 + MaxGap, BR.y1 - MaxGap);
 
     Rpt.Add('X1 ' +   CoordUnitToString(BR.x1 - BOrigin.X, BUnits) + '  Y1 ' + CoordUnitToString(BR.y1 - BOrigin.Y, BUnits) +
@@ -255,25 +294,29 @@ begin
     Prim2 := SIterator.FirstPCBObject;
     while Prim2 <> Nil do
     begin
-        Comp := Prim2.Component;    // if in Component then add all the child objects.
-        if Comp <> Nil then
-        begin
-            GIterator := Comp.GroupIterator_Create;
-            GIterator.AddFilter_LayerSet(AllLayers);
-            GIterator.AddFilter_ObjectSet(MkSet(eTrackObject, eArcObject, ePadObject, eViaObject, eTextObject, eRegionObject, eFillObject));
-            Prim1 := GIterator.FirstPCBObject;
-            while Prim1 <> Nil do
+//      if CheckObjInsideBR(Prim2, BR, AllInside) then
+//      begin
+            Comp := Prim2.Component;    // if in Component then add all the child objects.
+            if Comp <> Nil then
             begin
-                AddPrimAndNetToList(Prim1, Primitives);
-                Prim1 := GIterator.NextPCBObject;
+                GIterator := Comp.GroupIterator_Create;
+                GIterator.AddFilter_LayerSet(AllLayers);
+                GIterator.AddFilter_ObjectSet(MkSet(eTrackObject, eArcObject, ePadObject, eViaObject, eTextObject, eRegionObject, eFillObject, eNetObject));
+                Prim1 := GIterator.FirstPCBObject;
+                while Prim1 <> Nil do
+                begin
+                    AddPrimAndNetToList(Prim1, Primitives);
+                    Prim1 := GIterator.NextPCBObject;
+                end;
+                Comp.GroupIterator_Destroy(GIterator);
             end;
-            Comp.GroupIterator_Destroy(GIterator);
-        end;
 
-        AddPrimAndNetToList(Prim2, Primitives);
+            AddPrimAndNetToList(Prim2, Primitives);
+//      end;
         Prim2 := SIterator.NextPCBObject;
     end;
     Board.SpatialIterator_Destroy(SIterator);
+//    Board.BoardIterator_Destroy(BIterator);
 
     RulesList := GetRulesfromBoard(Board, cAllRules);
     RKindList := GetRuleKinds(RulesList);
@@ -289,57 +332,61 @@ begin
     for K := 0 to (RKindList.Count - 1) do
     begin
         RuleKind := RKindList.Strings(K);
-        for I := 0 to (Primitives.Count - 1) do
+        for R := 0 to (RulesList.Count - 1 ) do
         begin
-            Prim1 := Primitives.Items(I);
-            Rule := Board.FindDominantRuleForObject(Prim1, RuleKind);
-            if Rule <> nil then
-            if Rule.IsUnary and Rule.Enabled then
+            Rule := RulesList.Items(R);
+            if Rule.RuleKind = RuleKind then
             begin
-//                Rule.CheckUnaryScope(Prim1);
-//                Rule.Scope1Includes(Prim1);
-                Violation := Rule.ActualCheck(Prim1, nil);
-                if Violation <> nil then
+                if Rule.Enabled then
                 begin
-                    Board.AddPCBObject(Violation);
-                    ViolDesc := Violation.Description;
-                    ViolDesc := Copy(ViolDesc, 0, 60);
-                    //Setlength(ViolDesc,40);
-                    Rpt.Add('U  ' + PadRight(Prim1.ObjectIDString, 10) + '            ' + PadRight(Violation.Name, 20) + ' '
-                            + PadRight(ViolDesc, 60) + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
-
-                    Prim1.SetState_DRCError(true);
-                    Prim1.GraphicallyInvalidate;
-                    inc(VCount);
-                end;
-            end;
-
-            for J := (I + 1) to (Primitives.Count - 1) do
-            begin
-                Prim2 := Primitives.Items(J);
-                Rule := Board.FindDominantRuleForObjectPair(Prim1, Prim2, RuleKind);
-                if Rule <> nil then
-                if (not Rule.IsUnary) and Rule.Enabled then
-                begin
-//                  Rule.CheckBinaryScope(Prim1, Prim2);
-//                  Rule.Scope2Includes(Prim2);
-                    Violation := Rule.ActualCheck(Prim1, Prim2);
-                    if Violation <> nil then
+                    for I := 0 to (Primitives.Count - 1) do
                     begin
-                        Board.AddPCBObject(Violation);
-                        ViolDesc := Violation.Description;
-                        ViolDesc := Copy(ViolDesc, 0, 60);
-                        //SetLength(ViolDesc,40);
-                        Rpt.Add('B  '+ PadRight(Prim1.ObjectIDString, 10) + ' ' + PadRight(Prim2.ObjectIDString, 10) + ' ' + PadRight(Violation.Name, 20)
-                                + ' ' + PadRight(ViolDesc, 60) + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
-                        Prim1.SetState_DRCError(true);
-                        Prim2.SetState_DRCError(true);
-                        Prim1.GraphicallyInvalidate;
-                        Prim2.GraphicallyInvalidate;
-                        inc(VCount);
-                    end;
-                end;
-            end;  // J
+                        Prim1 := Primitives.Items(I);
+//              Rule := Board.FindDominantRuleForObject(Prim1, RuleKind);   // this is wrong !
+//                        Rule.CheckUnaryScope(Prim1);
+//                        Rule.Scope1Includes(Prim1);
+                        Violation := nil;
+                        if Rule.IsUnary then
+                            Violation := Rule.ActualCheck(Prim1, nil);
+                        if Violation <> nil then
+                        begin
+                            Board.AddPCBObject(Violation);
+                            ViolDesc := Violation.Description;
+                            ViolDesc := Copy(ViolDesc, 0, 60);
+                            Rpt.Add('U  ' + PadRight(Prim1.ObjectIDString, 10) + '            ' + PadRight(Violation.Name, 20) + ' '
+                                    + ViolDesc + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
+
+                            Prim1.SetState_DRCError(true);
+                            Prim1.GraphicallyInvalidate;
+                            inc(VCount);
+                        end;
+
+                        for J := (I + 1) to (Primitives.Count - 1) do
+                        begin
+                            Prim2 := Primitives.Items(J);
+//                  Rule := Board.FindDominantRuleForObjectPair(Prim1, Prim2, RuleKind);
+//                            Rule.CheckBinaryScope(Prim1, Prim2);
+//                            Rule.Scope2Includes(Prim2);
+                            Violation := nil;
+                            if (not Rule.IsUnary) then
+                                Violation := Rule.ActualCheck(Prim1, Prim2);
+                            if Violation <> nil then
+                            begin
+                                Board.AddPCBObject(Violation);
+                                ViolDesc := Violation.Description;
+                                ViolDesc := Copy(ViolDesc, 0, 60);
+                                Rpt.Add('B  '+ PadRight(Prim1.ObjectIDString, 10) + ' ' + PadRight(Prim2.ObjectIDString, 10) + ' ' + PadRight(Violation.Name, 20)
+                                        + ' ' + ViolDesc + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
+                                Prim1.SetState_DRCError(true);
+                                Prim2.SetState_DRCError(true);
+                                Prim1.GraphicallyInvalidate;
+                                Prim2.GraphicallyInvalidate;
+                                inc(VCount);
+                            end;
+                        end;  // J
+                    end;     // I
+                end;  // enabled
+            end; // if rulekind
 
             if (VCount > 0) and ((VCount mod ErrorCountPrompt) = 0) then
             begin
@@ -348,7 +395,7 @@ begin
                 if not dlgresult then GetOutOfLoops := true;
             end;
             if GetOutOfLoops then break;
-        end;   // I
+        end;   // R
         if GetOutOfLoops then break;
     end;    // K
 
@@ -357,9 +404,6 @@ begin
     RKindList.Free;
 
     EndHourGlass;
-    Board.ViewManager_FullUpdate;
-//    Client.SendMessage('PCB:Zoom', 'Action=Redraw' , 255, Client.CurrentView);
-    if VCount = 0 then ShowMessage('NO Violations Found ');
 end;
 
 procedure StartReport(Board : IPCB_Board);
@@ -399,19 +443,18 @@ end;
 
 procedure ShowViolationsArea;
 var
-    x, y      : TCoord;
-    x2, y2    : TCoord;
-    BR        : TCoordRect;
+    x, y, x2, y2 : TCoord;
+    BR           : TCoordRect;
 begin
     Board := PCBServer.GetCurrentPCBBoard;
     if Board = Nil then exit;
 
     StartReport(Board);
-    KeySet := MkSet();
 
     if Board.ChooseRectangleByCorners('Zone First Corner ','Zone Opposite Corner ', x, y, x2, y2) then
     begin
 //   read modifier keys just as/after the "pick" mouse click
+        KeySet := MkSet();
         if ShiftKeyDown   then KeySet := MkSet(cShiftKey);
         if AltKeyDown     then KeySet := SetUnion(KeySet, MkSet(cAltKey));
         if ControlKeyDown then KeySet := SetUnion(KeySet, MkSet(cCntlKey));
@@ -422,7 +465,11 @@ begin
         Rpt.Add('');
         Rpt.Add('Existing DRC markers cleared');
         VCount := 0;
-        ShowViolations(BR);
+        ShowViolations(BR, cInside);
+
+        Board.ViewManager_FullUpdate;
+//    Client.SendMessage('PCB:Zoom', 'Action=Redraw' , 255, Client.CurrentView);
+        if VCount = 0 then ShowMessage('NO Violations Found ');
 
         SaveShowReport(VCount);
     end;
@@ -442,7 +489,7 @@ begin
     if Board = Nil then exit;
 
     StartReport(Board);
-    SetObjects := MkSet(eComponentObject, eComponentBodyObject, eTrackObject, eArcObject,ePadObject,
+    SetObjects := MkSet(eComponentObject, eComponentBodyObject, eTrackObject, eArcObject, ePadObject,
                         eViaObject, eTextObject, ePolyObject, eRegionObject, eFillObject);
     Prim1 := eNoObject;
 
@@ -452,7 +499,7 @@ begin
         if not InSet(Prim1.ObjectId, SetObjects) then Prim1 := eNoObject;
     end;
 
-    Client.SendMessage('PCB:ResetAllErrorMarkers', '', 255, Client.CurrentView);
+//    Client.SendMessage('PCB:ResetAllErrorMarkers', '', 255, Client.CurrentView);
 
     TotVCount := 0;
     msg := 'Select Object for Design Rules Check ';
@@ -462,6 +509,12 @@ begin
         begin
             if Board.ChooseLocation(x, y, msg) then  // false = ESC Key is pressed
             begin
+//   read modifier keys just as/after the "pick" mouse click
+                KeySet := MkSet();
+                if ShiftKeyDown   then KeySet := MkSet(cShiftKey);
+                if AltKeyDown     then KeySet := SetUnion(KeySet, MkSet(cAltKey));
+                if ControlKeyDown then KeySet := SetUnion(KeySet, MkSet(cCntlKey));
+
                 Prim1 := Board.GetObjectAtXYAskUserIfAmbiguous(x, y, SetObjects, AllLayers, eEditAction_Select);
             end
             else Finished := true;
@@ -470,13 +523,13 @@ begin
         if (not Finished) and (Prim1 <> eNoObject) then
         begin
             if Prim1.ObjectId = eComponentObject then Comp := Prim1;
-            if Prim1.ObjectiD = eComponentBodyObject then Comp := Prim1.Component;
+            if Prim1.ObjectId = eComponentBodyObject then Comp := Prim1.Component;
             if (Comp <> Nil) and InSet(Prim1.ObjectId, MkSet(eComponentObject, eComponentBodyObject)) then
                 BR := GetComponentBR(Comp)
             else
                 BR := Prim1.BoundingRectangle;
 
-            ShowViolations(BR);
+            ShowViolations(BR, cTouch);
             TotVCount := TotVCount + VCount;
         end;
 
@@ -484,7 +537,8 @@ begin
         msg   := 'Select Another Object for DRC ?  or <esc> ';
     until Finished;
 
-    if TotVCount > 0 then SaveShowReport(TotVCount);
+    Board.ViewManager_FullUpdate;
+    SaveShowReport(TotVCount);
 end;
 
 
