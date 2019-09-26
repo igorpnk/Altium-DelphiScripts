@@ -12,14 +12,16 @@ Author: BL Miller
 19/08/2019 : first cut POC
 20/08/2019 : implemented choose rectange & got DRCmarkers to display.
 21/08/2019 : binary rule loop iterating was creating duplicate violations.
-19/09/2019 : test only the dominant Rule of each RuleKind.
+19/09/2019 : test only the dominant Rule of each RuleKind.  << err
 20/09/2019 : Ensure all child objects of "Group objects" i.e. component are collected.
              Confirm continue with multiples of n const violations
 24/09/2019 : Add modifier keys to change search area size & clear previous violation
 24/09/2019 : FindDominantRuleForObject is completely wrong; missing key net errors.
 25/09/2019 : CheckUnary/BinaryScope is fastest & no false positives or missing errors.
+26/09/2019 : Add ignore set & ignore Confinement Constraint rule as slow & adds little
 
 tbd: magic speed up
+Confinement Constraint (Rooms) does not raise violations & wastes lots of time (9sec test board)
 
 consider:
 -  not using SpatialIterator (non group)
@@ -29,7 +31,8 @@ consider:
 const
     OpenReport       = true;      // not working
     FocusReport      = false;
-    ErrorCountPrompt = 20;     // modulus this confirm dialog
+    Metrics          = true;     // time of each rule in report
+    ErrorCountPrompt = 20;       // modulus this confirm dialog
     cESC      = -1;
     cAllRules = -1;
     cAltKey   = 1;
@@ -47,7 +50,8 @@ var
     BOrigin        : TPoint;
     Prim1          : IPCB_Primitive;
     Prim2          : IPCB_Primitive;
-    KeySet         : TObjectSet;    // keyboard key modifiers <alt> <shift> <cntl>
+    RulesIgnoreSet : TObjectSet;      // confinement constraint ++
+    KeySet         : TObjectSet;      // keyboard key modifiers <alt> <shift> <cntl>
     VCount         : integer;
     dlgResult      : boolean;   // integer for cancel version FFS
 
@@ -103,13 +107,26 @@ begin
         eRule_MaxMinHoleSize           : Result := 'HoleSize';
         eRule_TestPointStyle           : Result := 'Testpoint';
         eRule_TestPointUsage           : Result := 'TestPointUsage';
-        eRule_UnconnectedPin           : Result := 'UnConnectedPin';
-        eRule_SMDToPlane               : Result := 'SMDToPlane';
-        eRule_SMDNeckDown              : Result := 'SMDNeckDown';
-        eRule_LayerPair                : Result := 'LayerPairs';
-        eRule_FanoutControl            : Result := 'FanoutControl';
+        eRule_UnconnectedPin           : Result := 'UnConnected Pin';
+        eRule_SMDToPlane               : Result := 'SMD to Plane';
+        eRule_SMDNeckDown              : Result := 'SMD NeckDown';
+        eRule_LayerPair                : Result := 'Layer Pairs';
+        eRule_FanoutControl            : Result := 'Fanout Control';
         eRule_MaxMinHeight             : Result := 'Height';
-        eRule_DifferentialPairsRouting : Result := 'DiffPairsRouting';
+        eRule_DifferentialPairsRouting  : Result := 'Diff Pairs Routing';
+        eRule_HoleToHoleClearance       : Result := 'Hoe to Hole Clearance';
+        eRule_MinimumSolderMaskSliver   : Result := 'Minimum SolderMask Sliver';
+        eRule_SilkToSolderMaskClearance : Result := 'Silk to SolderMask Clearance';
+        eRule_SilkToSilkClearance       : Result := 'Silk to Silk Clearance';
+        eRule_NetAntennae               : Result := 'Net Antennae';
+        eRule_AssyTestPointStyle        : Result := 'Assy TestPoint Style';
+        eRule_AssyTestPointUsage        : Result := 'Assy TestPoint Usage';
+        eRule_SilkToBoardRegion         : Result := 'Silk To Board Region';
+        eRule_SMDPADEntry               : Result := 'SMD Pad Entry';
+        eRule_None                      : Result := 'NO Rule';
+        eRule_ModifiedPolygon           : Result := 'Modified Polygon';
+        eRule_BoardOutlineClearance     : Result := 'Board Outline Clearance';
+        eRule_BackDrilling              : Result := 'Back Drilling';
     end;
 end;
 
@@ -117,6 +134,7 @@ function MaxGapFromRules(Board : IPCB_Board, const RuleKSet : TObjectSet) : sing
 var
     Iterator   : IPCB_BoardIterator;
     Rule       : IPCB_Rule;
+    RuleKind   : TRuleKind;
 begin
     Result := 0;
     //Determine MaxWidth to help narrow area of focus
@@ -127,7 +145,8 @@ begin
     Rule := Iterator.FirstPCBObject;
     while (Rule <> Nil) do
     begin
-        if InSet(Rule.RuleKind, RuleKSet) and Rule.Enabled then
+        RuleKind := Rule.RuleKind;
+        if InSet(RuleKind, RuleKSet) and Rule.Enabled then
             Result := Max(Result, Rule.Gap);
         Rule := Iterator.NextPCBObject;
     end;
@@ -210,13 +229,13 @@ begin
     if Primitives.IndexOf(Prim2) = -1 then
     begin
         Primitives.Add(Prim2);
-        Rpt.Add(PadRight(Prim2.ObjectIDString, 15) + StringOfChar(' ', 17) + Layer2String(Prim2.Layer));
+        Rpt.Add(PadRight(Prim2.ObjectIDString, 15) + StringOfChar(' ', 17) + Layer2String(Prim2.Layer) + ' ' + Board.LayerName(Prim2.Layer) );
     end;
     if Prim2.InNet then
         if Primitives.IndexOf(Prim2.Net) = -1 then
         begin
             Primitives.Add(Prim2.Net);
-            Rpt.Add(PadRight(Prim2.Net.ObjectIDString,15) + ' ' + PadRight(Prim2.Net.Name, 15) + ' ' + Layer2String(Prim2.Layer));
+            Rpt.Add(PadRight(Prim2.Net.ObjectIDString,15) + ' ' + PadRight(Prim2.Net.Name, 15) + ' ' + Layer2String(Prim2.Layer) + ' ' + Board.LayerName(Prim2.Layer) );
         end;
 end;
 
@@ -253,10 +272,11 @@ var
     RKindList  : TStringList;
     RulesList  : TObjectList;
     Comp       : IPCB_Component;
-
+    ValidScope : boolean;
     Primitives : TObjectList;
     Violation  : IPCB_Violation;
     ViolDesc   : WideString;
+    ViolName : WideString;
     MaxGap     : single;
     I, J, K, R : integer;
     GetOutOfLoops : boolean;
@@ -266,6 +286,8 @@ begin
     BeginHourGlass(crHourGlass);
     BR := CheckPosRectCoord(BR);
     MaxGap := MaxGapfromRules(Board, MkSet(eRule_Clearance));
+
+    RulesIgnoreSet := MkSet(eRule_ConfinementConstraint);
 
     if not InSet(cShiftKey, KeySet) then
         MaxGap := MaxGap * 1.1;    // 10% more
@@ -324,10 +346,8 @@ begin
     RKindList := GetRuleKinds(RulesList);
     Rpt.Add('');
     DateTime := GetTime;
-    Rpt.Add(TimeToStr(DateTime));
-
-//    Rpt.Add('Existing DRC markers cleared');
-//    Rpt.Add('');
+    Rpt.Add(TimeToStr(DateTime) + ' start');
+    Rpt.Add('');
     Rpt.Add('Violations from Design Rule Checking');
     Rpt.Add('   prim1:    prim2:       Violation Name:         Desc.:                  RuleName:              RuleType: ');
 
@@ -340,21 +360,19 @@ begin
         for R := 0 to (RulesList.Count - 1 ) do
         begin
             Rule := RulesList.Items(R);
-
-//      both below is wrong & prevents all rules being used
-//          Rule := Board.FindDominantRuleForObject(Prim1, RuleKind);   // this is wrong !
-//          Rule := Board.FindDominantRuleForObjectPair(Prim1, Prim2, RuleKind);
-
-            if Rule.RuleKind = RuleKind then
+            if (not InSet(RuleKind, RulesIgnoreSet)) and (Rule.RuleKind = RuleKind) then
             begin
                 if Rule.Enabled then
                 begin
+                    DateTime := GetTime;
+                    if Metrics then Rpt.Add(TimeToStr(DateTime) + ' ' + Rule.Name);
+
                     for I := 0 to (Primitives.Count - 1) do
                     begin
                         Prim1 := Primitives.Items(I);
                         Violation := nil;
                         if Rule.IsUnary then
-                        if  Rule.CheckUnaryScope(Prim1) then      // required to avoid false positives
+                        if Rule.CheckUnaryScope(Prim1) then      // required to avoid false positives
 //                        if Rule.Scope1Includes(Prim1) then      // no diff & no faster!
                             Violation := Rule.ActualCheck(Prim1, nil);
                         if Violation <> nil then
@@ -362,7 +380,8 @@ begin
                             Board.AddPCBObject(Violation);
                             ViolDesc := Violation.Description;
                             ViolDesc := Copy(ViolDesc, 0, 60);
-                            Rpt.Add('U  ' + PadRight(Prim1.ObjectIDString, 10) + '            ' + PadRight(Violation.Name, 20) + ' '
+                            ViolName := Violation.Name;
+                            Rpt.Add('U  ' + PadRight(Prim1.ObjectIDString, 10) + '            ' + PadRight(ViolName, 30) + ' '
                                     + ViolDesc + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
 
                             Prim1.SetState_DRCError(true);
@@ -375,21 +394,26 @@ begin
                             Prim2 := Primitives.Items(J);
                             Violation := nil;
                             if (not Rule.IsUnary) then
-                            if Rule.CheckBinaryScope(Prim1, Prim2) then    // required to avoid false positives
-//                            if Rule.Scope2Includes(Prim2) then           // no diff & no faster!
-                                Violation := Rule.ActualCheck(Prim1, Prim2);
-                            if Violation <> nil then
                             begin
-                                Board.AddPCBObject(Violation);
-                                ViolDesc := Violation.Description;
-                                ViolDesc := Copy(ViolDesc, 0, 60);
-                                Rpt.Add('B  '+ PadRight(Prim1.ObjectIDString, 10) + ' ' + PadRight(Prim2.ObjectIDString, 10) + ' ' + PadRight(Violation.Name, 20)
-                                        + ' ' + ViolDesc + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
-                                Prim1.SetState_DRCError(true);
-                                Prim2.SetState_DRCError(true);
-                                Prim1.GraphicallyInvalidate;
-                                Prim2.GraphicallyInvalidate;
-                                inc(VCount);
+                                ValidScope := Rule.CheckBinaryScope(Prim1, Prim2);    // required to avoid false positives
+                                if ValidScope then
+//                            if Rule.Scope2Includes(Prim2) then                      // no diff & no faster!
+                                    Violation := Rule.ActualCheck(Prim1, Prim2);     // do NOT need to test reverse !
+                                if Violation <> nil then
+                                begin
+                                    Board.AddPCBObject(Violation);
+                                    ViolDesc := Violation.Description;
+                                    ViolDesc := Copy(ViolDesc, 0, 60);
+                                    ViolName := Violation.Name;
+                                    Rpt.Add('B  ' + PadRight(Prim1.ObjectIDString, 10) + ' ' + PadRight(Prim2.ObjectIDString, 10) + ' ' + PadRight(ViolName, 30)
+                                            + ' ' + ViolDesc + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
+
+                                    Prim1.SetState_DRCError(true);
+                                    Prim2.SetState_DRCError(true);
+                                    Prim1.GraphicallyInvalidate;
+                                    Prim2.GraphicallyInvalidate;
+                                    inc(VCount);
+                                end;
                             end;
                         end;  // J
                     end;     // I
@@ -411,7 +435,7 @@ begin
     RulesList.Destroy;
     RKindList.Free;
     DateTime := GetTime;
-    Rpt.Add(TimeToStr(DateTime));
+    Rpt.Add(TimeToStr(DateTime) + ' end');
     EndHourGlass;
 end;
 
@@ -552,4 +576,8 @@ end;
 
 
 // Violation := PCBServer.PCBObjectFactory(eViolationObject, eNoDimension, eCreate_Default);
+
+//      both below is wrong & prevents all rules being used
+//          Rule := Board.FindDominantRuleForObject(Prim1, RuleKind);   // this is wrong !
+//          Rule := Board.FindDominantRuleForObjectPair(Prim1, Prim2, RuleKind);
 
