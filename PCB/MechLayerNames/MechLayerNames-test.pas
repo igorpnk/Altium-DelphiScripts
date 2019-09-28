@@ -1,8 +1,8 @@
 {.................................................................................
- Summary   This script can be used to export mech layer info to a text *.ini file.
+ Summary   Used to test LayerClass methods in AD17-19 & report into text file.
            Works on PcbDoc & PcbLib files.
            Mechanical layer Names, Colours and MechanicalPairs can be
-           exported/imported to another PcbDoc/PcbLib file
+           exported to text file
 
   From script by:    Petar Perisin
   url: https://github.com/Altium-Designer-addons/scripts-libraries/tree/master/MechLayerNames
@@ -17,12 +17,17 @@
  01/07/2019  :  messed with MechPair DNW; added MinMax MechLayer constants to report
  08/09/2019  : use _V7 layerstack for mech layer info.
  11/09/2019  : use & report the LayerIDs & iterate to 64 mech layers.
+ 28/09/2019  : Added colour & display status to layerclass outputs
 
          tbd :  Use Layer Classes test in AD17 & AD19
+
+Note: can export 1 to 64 mech layers in AD17/18/19
+
 ..................................................................................}
 
 {.................................................................................}
 var
+    PCBSysOpts : IPCB_SystemOptions;
     Board      : IPCB_Board;
     LayerStack : IPCB_LayerStack;
     LayerObj   : IPCB_LayerObject;
@@ -66,30 +71,21 @@ var
    temp        : integer;
    LayerName   : WideString;
    LayerPos    : WideString;
+   Layer       : integer;
+   LColour     : WideString;
+   LName       : WideString;
+   IsDisplayed : boolean;
 
 begin
-   Board := PCBServer.GetCurrentPCBBoard;
-   if Board = nil then exit;
-   WS := GetWorkSpace;
-   FileName := WS.DM_FocusedDocument.DM_FullPath;
-   FileName := ExtractFilePath(FileName);
+    Board := PCBServer.GetCurrentPCBBoard;
+    if Board = nil then exit;
 
-{   SaveDialog        := TSaveDialog.Create(Application);
-   SaveDialog.FileName := FileName;
-   SaveDialog.Title  := 'Save Mech Layer Names to *.ini file';
-   SaveDialog.Filter := 'INI file (*.ini)|*.ini';
+    PCBSysOpts := PCBServer.SystemOptions;
+    If PCBSysOpts = Nil Then exit;
 
-   Flag := SaveDialog.Execute;
-   if (not Flag) then exit;
-
-   FileName := SaveDialog.FileName;
-
-   // Set file extension
-   FileName := ChangeFileExt(FileName, '.ini');
-   IniFile := TIniFile.Create(FileName);
-}
-
-    Client.GetProductVersion;
+    WS := GetWorkSpace;
+    FileName := WS.DM_FocusedDocument.DM_FullPath;
+    FileName := ExtractFilePath(FileName);
 
     TempS := TStringList.Create;
 
@@ -99,37 +95,58 @@ begin
 
     LayerStack := Board.LayerStack;
 
+
+// LayerClass methods    Mechanical is strangely absent/empty.
+
     for LayerClass := eLayerClass_All to eLayerClass_PasteMask do
     begin
         TempS.Add('');
         TempS.Add('eLayerClass ' + IntToStr(LayerClass) + '  ' + LayerClassName(LayerClass));
-        TempS.Add('lc.i : |   name');
+        TempS.Add('lc.i : |   name           short name           IsDisplayed?   Colour');
         i := 1;
         LayerObj := LayerStack.First(LayerClass);
+
         While (LayerObj <> Nil ) do
         begin
+            if LayerClass <> eLayerClass_Mechanical then
+                Layer := LayerObj.V6_LayerID             //  V7_LayerID;
+            else
+                Layer :=  LayerUtils.MechanicalLayer(i);
+
+            LayerObj.IsInLayerStack;
+
             LayerPos :='';
             if LayerClass = eLayerClass_Electrical then
                LayerPos := IntToStr(Board.LayerPositionInSet(AllLayers, LayerObj));       // think this only applies to eLayerClass_Electrical
 
-           TempS.Add(Padright(IntToStr(LayerClass) + '.' + IntToStr(i),4) + ' | ' + Padright(LayerPos,3) + ' ' + LayerObj.Name);
+            LName := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Short) ; // TLayernameDisplayMode: eLayerNameDisplay_Long/Short/Medium
+            IsDisplayed := Board.LayerIsDisplayed(Layer);
+           // ColorToString(Board.L .LayerColor(Layer]));   // TV6_Layer
+            LColour := ColorToString(PCBSysOpts.LayerColors(Layer));
+
+            TempS.Add(Padright(IntToStr(LayerClass) + '.' + IntToStr(i),4) + ' | ' + Padright(LayerPos,3) + ' ' + PadRight(LayerObj.Name, 15)
+                      + PadRight(LName, 20) + '  ' + PadRight(BoolToStr(IsDisplayed,true), 6) + '  ' + LColour);
+
 //       if LayerObj <> Nil then MechLayer := LayerObj;
-           LayerObj := LayerStack.Next(Layerclass, LayerObj);
-           Inc(i);
+            LayerObj := LayerStack.Next(Layerclass, LayerObj);
+            Inc(i);
         end;
     end;
 
     TempS.Add('');
     TempS.Add('');
-    TempS.Add('Layers constants: ');
+
+    TempS.Add('API Layers constants: (all obsolute)');
     TempS.Add('MaxRouteLayer = ' +  IntToStr(MaxRouteLayer) +' |  MaxBoardLayer = ' + IntToStr(MaxBoardLayer) );
     TempS.Add(' MinLayer = ' + IntToStr(MinLayer) + '   | MaxLayer = ' + IntToStr(MaxLayer) );
     TempS.Add(' MinMechanicalLayer = ' + IntToStr(MinMechanicalLayer) + '  | MaxMechanicalLayer =' + IntToStr(MaxMechanicalLayer) );
     TempS.Add('');
     TempS.Add(' ----- .LayerObject(index) Mechanical ------');
     TempS.Add('');
-    
-  
+
+
+// Old? Methods for Mechanical Layers.
+
     LayerStack := Board.LayerStack_V7;
     TempS.Add('Idx LayerID    boardlayername      layername           V6_LayerID');
     for i := 1 to 64 do
@@ -141,9 +158,14 @@ begin
         if LayerObj <> Nil then                     // 2 different indices for the same object info, Fg Madness!!!
         begin
             LayerName := LayerObj.Name;
-            Layer7 := LayerObj.V7_LayerID;      // __TV7_Layer_Wrapper() how to use?
+            Layer7 := LayerObj.V7_LayerID;      // needs wrapper function  __TV7_Layer_Wrapper() how to use?
 
-            Layer7;
+      //  ('MechLayer' + IntToStr(i), 'Enabled', MechLayer.MechanicalLayerEnabled);
+      //  ('MechLayer' + IntToStr(i), 'Show',    MechLayer.IsDisplayed[Board]);
+      //  ('MechLayer' + IntToStr(i), 'Sheet',   MechLayer.LinkToSheet);
+      //  ('MechLayer' + IntToStr(i), 'SLM',     MechLayer.DisplayInSingleLayerMode);
+      //  ('MechLayer' + IntToStr(i), 'Color',   ColorToString(Board.LayerColor[ML1]) );
+
         end;
         TempS.Add(PadRight(IntToStr(i),3) + ' ' + PadRight(IntToStr(ML1),10) + ' ' + PadRight(Board.LayerName(ML1),20) + ' ' + PadRight(LayerName,20) + ' ' + IntToStr(LayerObj.V6_LayerID));
         // LayerObj.UsedByPrims;
@@ -164,32 +186,35 @@ begin
     MechPairs := Board.MechanicalPairs;
 
     TempS.Add('Mech Layer Pair Count : ' + IntToStr(MechPairs.Count));
+    TempS.Add('');
 
     for j := 0 to (MechPairs.Count - 1) do
     begin
         MechPair := MechPairs.LayerPair[j];
         if MechPair <> Nil then
         begin
+ //  broken because no wrapper function to handle TMechanicalLayerPair record.
 {
 TMechanicalLayerPair = Record
 Layer1 : TLayer;
 Layer2 : TLayer;
 End;
 }
-//            MechPair ;   //  .Layer1;                      // does NOT work
+//            Layer := MechPair ;   //  .Layer1;              // does NOT work
 //            MechPair(Layer1);
-//            Layer := MechPair.GetTypeInfoCount(0);         // __TMechanicalLayerPair__Wrapper
-//            Layer := MechPair;
+//            Layer := MechPair.GetTypeInfoCount(0);         // __TMechanicalLayerPair__Wrapper()
 
 //     FFS !! why is MechPair Layer properties not the same/similar to DrillPairs.
 
-//            MechPair.GetTypeInfoCount(temp);
 //            IniFile.WriteString('MechLayer' + IntToStr(MechPair[0]), 'Pair',    Board.LayerName(MechPair[0]) );
 //            IniFile.WriteString('MechLayer' + IntToStr(MechPair[1]), 'Pair',    Board.LayerName(MechPair[1]) );
         end;
     end;
 
-  // mickey mouse soln
+
+// working mickey mouse soln
+
+    TempS.Add('MechLayer Pairs:     LayerName1 - LayerName2 ');
 
     for i := 1 to 64 do
 //  for Layer := MinMechanicalLayer to MaxMechanicalLayer do
@@ -199,8 +224,6 @@ End;
         MechLayer := LayerStack.LayerObject_V7[ML1];
 
 //        MechLayer := LayerStack.LayerObject[Layer];      // this method does not work above eMech24 !!
-//        if (MechLayer <> Nil) or true then            // this test STOPS layers above some eMech showing up !!
-//        begin
 
 //        if MechPairs.LayerUsed(Layer) then         // always false ! ; pass it (MechLayer) & will crash!
 //        begin
@@ -209,7 +232,7 @@ End;
             begin
                 ML2 := LayerUtils.MechanicalLayer(j);
                 if MechPairs.PairDefined(ML1, ML2) then
-                    TempS.Add('MechLayer ' + IntToStr(i) + '-' + IntToStr(j) + ' Pair ' + Board.LayerName(ML1) + ' - ' + Board.LayerName(ML2) );
+                    TempS.Add(PadRight(IntToStr(i),3) + '-' + PadLeft(IntToStr(j),3) + '                 ' + Board.LayerName(ML1) + ' - ' + Board.LayerName(ML2) );
             end;
     end;
 
@@ -220,15 +243,6 @@ End;
     TempS.SaveToFile(FileName);
     Exit;
 
-end;
-
-
-Procedure ImportMechLayerInfoDummy(dummy : integer);
-var
-    temp : boolean;
-begin
-
-    ShowInfo('The names & colours assigned to layers (& mech pairs) have been updated.');
 end;
 
 {
