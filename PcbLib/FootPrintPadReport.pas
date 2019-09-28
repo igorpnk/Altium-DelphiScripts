@@ -7,11 +7,19 @@
  13/09/2019  BLM  v0.1  Cut&paste out of Footprint-SS-Fix.pas
  13/09/2019  BLM  v0.11 Holetype was converted as boolean..
                   v0.12 Set units with const.
+28/09/2019   BLM  v0.13 Add footprint/board origin
+29/09/2019   BLM  v0.14 Add tests for origin & bounding rectangle CoG.
+
+note:  Creating a PcbLib from problem PcbDoc footprints can show incorrect Origin.
+Reloading PcbLib appears to cuase dll crash & then Origin is fixed but BR & pads are offset.
+
 
 }
 //...................................................................................
 const
-    Units = eMetric; //eImperial;
+    Units      = eMetric; //eImperial;
+    XOExpected = 50000;   // expected X origin mil
+    YOExpected = 50000;   // mil
 
 Var
     CurrentLib : IPCB_Library;
@@ -45,6 +53,13 @@ var
     PadCache     : TPadCache;
     Layer        : TLayer;
     NoOfPrims    : Integer;
+    BR           : TCoordRect;
+    FPCoG        : TCoordPoint;
+    BOrigin      : TCoordPoint;
+    BWOrigin     : TCoordPoint;
+    TestPoint    : TPoint;
+    BadFPList    : TStringList;
+    I            : integer;
 //    Units        : TUnit;
 
 begin
@@ -55,6 +70,7 @@ begin
         Exit;
     End;
 
+    BeginHourGlass(crHourGlass);
 //    Units := eImperial;
 
     // For each page of library is a footprint
@@ -62,15 +78,45 @@ begin
     FPIterator.SetState_FilterAll;
     FPIterator.AddFilter_LayerSet(AllLayers);
 
-    Rpt := TStringList.Create;
+    BadFPList := TStringList.Create;
+    Rpt       := TStringList.Create;
     Rpt.Add(ExtractFileName(CurrentLib.Board.FileName));
+    Rpt.Add('');
     Rpt.Add('');
 
     Footprint := FPIterator.FirstPCBObject;
     while Footprint <> Nil Do
     begin
         Rpt.Add('Footprint : ' + Footprint.Name);
+        Rpt.Add('');
 
+        BOrigin  := Point(CurrentLib.Board.XOrigin,      CurrentLib.Board.YOrigin     );  // abs Tcoord
+        BWOrigin := Point(CurrentLib.Board.WorldXOrigin, CurrentLib.Board.WorldYOrigin);
+
+        BR    := Footprint.BoundingRectangle;                  // always zero!!  abs origin TCoord
+        BR    := Footprint.BoundingRectangleChildren;          // abs origin TCoord
+        FPCoG := Point(BR.x1 + (RectWidth(BR) / 2), BR.y1 + (RectHeight(BR) / 2));
+
+        BR := RectToCoordRect(                         // relative to origin TCoord
+              Rect((BR.x1), (BR.y2), (BR.x2), (BR.y1)) );
+              // Rect((BR.x1 - BORigin.X), (BR.y2 - BOrigin.Y), (BR.x2 - BOrigin.X), (BR.y1 - BOrigin.Y)) );
+
+        Rpt.Add('origin board x ' + CoordUnitToString(BOrigin.X,  eMil) + '  y ' + CoordUnitToString(BOrigin.Y,  eMil) );
+        Rpt.Add('origin world x ' + CoordUnitToString(BWOrigin.X, eMil) + '  y ' + CoordUnitToString(BWOrigin.Y, eMil) );
+        Rpt.Add('FP b.rect ref origin x1 ' + CoordUnitToString(BR.x1, eMil) + '  y1 ' + CoordUnitToString(BR.y1, eMil) +
+                '  x2 ' + CoordUnitToString(BR.x2, eMil) + '  y2 ' + CoordUnitToString(BR.y2, eMil) );
+
+        if (CoordToMils(BOrigin.X) <> XOExpected) or (CoordToMils(BOrigin.Y) <> YOExpected) then
+            BadFPList.Add('BAD FP origin     ' + Footprint.Name);
+        if (BR.x1 > 0) or (BR.x2 < 0) or (BR.y1 > 0) or (BR.y2 < 0) then
+            BadFPList.Add('BAD origin Outside b.rect ' + Footprint.Name);
+
+        if (abs(FPCoG.X) > MilsToRealCoord(100)) or (abs(FPCoG.Y) > MilsToRealCoord(100))then
+            BadFPList.Add('possible bounding rect. offset ' + Footprint.Name);
+
+ 
+
+// bits of footprint
         Iterator := Footprint.GroupIterator_Create;
         Iterator.AddFilter_ObjectSet(MkSet(ePadObject, eViaObject));
 
@@ -138,7 +184,8 @@ begin
             Handle := Iterator.NextPCBObject;
         end;
 
-        Rpt.Add('Num Pads: ' + IntToStr(NoOfPrims));
+        Rpt.Add('Num Pads+Vias : ' + IntToStr(NoOfPrims));
+        Rpt.Add('');
         Rpt.Add('');
 
         Footprint.GroupIterator_Destroy(Iterator);
@@ -146,6 +193,15 @@ begin
     end;
 
     CurrentLib.LibraryIterator_Destroy(FPIterator);
+
+    for I := 0 to (BadFPList.Count - 1) do
+    begin
+        Rpt.Insert((I + 3), BadFPList.Strings(I));
+    end;
+    if (BadFPList.Count > 0) then Rpt.Insert(3, 'bad footprints detected');  
+
+    BadFPList.Free;
+    EndHourGlass;
 
     SaveReportLog('PadHoleReport.txt', true);
     Rpt.Free;
