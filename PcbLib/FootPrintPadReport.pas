@@ -9,10 +9,9 @@
                   v0.12 Set units with const.
 28/09/2019   BLM  v0.13 Add footprint/board origin
 29/09/2019   BLM  v0.14 Add tests for origin & bounding rectangle CoG.
+30/09/2019   BLM  v0.15 Seems lots of info BR & desc was not valid until after some setup
 
-note:  Creating a PcbLib from problem PcbDoc footprints can show incorrect Origin.
-Reloading PcbLib appears to cuase dll crash & then Origin is fixed but BR & pads are offset.
-
+note: First 4 or 5 statements run in loop seem to prevent false stale info
 
 }
 //...................................................................................
@@ -45,6 +44,23 @@ begin
             Document.DoFileLoad;
     end;
 end;
+{..................................................................................................}
+function GetCacheState (Value : TCacheState) : String;
+begin
+    Result := '?';
+    If Value = eCacheInvalid Then Result := 'Invalid';
+    If Value = eCacheValid   Then Result := 'Valid';
+    If Value = eCacheManual  Then Result := '''Manual''';
+end;
+{..................................................................................................}
+function GetPlaneConnectionStyle (Value : TPlaneConnectionStyle) : String;
+begin
+    Result := 'Unknown';
+    If Value = ePlaneNoConnect     Then Result := 'No Connect';
+    If Value = ePlaneReliefConnect Then Result := 'Relief';
+    If Value = ePlaneDirectConnect Then Result := 'Direct';
+end;
+{..................................................................................................}
 
 procedure ReportPadHole;
 var
@@ -83,10 +99,21 @@ begin
     Rpt.Add(ExtractFileName(CurrentLib.Board.FileName));
     Rpt.Add('');
     Rpt.Add('');
+    Rpt.Add('');
 
     Footprint := FPIterator.FirstPCBObject;
     while Footprint <> Nil Do
     begin
+// one of the next 4 or 5 lines seems to fix the erronous bounding rect of the alphabetic first item in Lib list
+// suspect it changes the Pad.Desc text as well
+
+        CurrentLib.SetBoardToComponentByName(Footprint.Name) ;   // fn returns boolean
+        CurrentLib.SetState_CurrentComponent (Footprint);
+        CurrentLib.Board.ViewManager_FullUpdate;
+        CurrentLib.RefreshView;
+
+        CurrentLib.Board.RebuildPadCaches;
+
         Rpt.Add('Footprint : ' + Footprint.Name);
         Rpt.Add('');
 
@@ -95,11 +122,10 @@ begin
 
         BR    := Footprint.BoundingRectangle;                  // always zero!!  abs origin TCoord
         BR    := Footprint.BoundingRectangleChildren;          // abs origin TCoord
-        FPCoG := Point(BR.x1 + (RectWidth(BR) / 2), BR.y1 + (RectHeight(BR) / 2));
-
         BR := RectToCoordRect(                         // relative to origin TCoord
-              Rect((BR.x1), (BR.y2), (BR.x2), (BR.y1)) );
-              // Rect((BR.x1 - BORigin.X), (BR.y2 - BOrigin.Y), (BR.x2 - BOrigin.X), (BR.y1 - BOrigin.Y)) );
+              // Rect((BR.x1), (BR.y2), (BR.x2), (BR.y1)) );
+              Rect((BR.x1 - BORigin.X), (BR.y2 - BOrigin.Y), (BR.x2 - BOrigin.X), (BR.y1 - BOrigin.Y)) );
+        FPCoG := Point(BR.x1 + (RectWidth(BR) / 2), BR.y1 + (RectHeight(BR) / 2));
 
         Rpt.Add('origin board x ' + CoordUnitToString(BOrigin.X,  eMil) + '  y ' + CoordUnitToString(BOrigin.Y,  eMil) );
         Rpt.Add('origin world x ' + CoordUnitToString(BWOrigin.X, eMil) + '  y ' + CoordUnitToString(BWOrigin.Y, eMil) );
@@ -111,7 +137,7 @@ begin
         if (BR.x1 > 0) or (BR.x2 < 0) or (BR.y1 > 0) or (BR.y2 < 0) then
             BadFPList.Add('BAD origin Outside b.rect ' + Footprint.Name);
 
-        if (abs(FPCoG.X) > MilsToRealCoord(100)) or (abs(FPCoG.Y) > MilsToRealCoord(100))then
+        if (abs(FPCoG.X) > MilsToRealCoord(200)) or (abs(FPCoG.Y) > MilsToRealCoord(200))then
             BadFPList.Add('possible bounding rect. offset ' + Footprint.Name);
 
  
@@ -132,26 +158,33 @@ begin
                 Layer := Pad.Layer;
                 // Pad.HoleType := eRoundHole;
                 // ePadMode_LocalStack;       // top-mid-bottom stack
+                Rpt.Add('');
+                Rpt.Add('Pad Name      : ' + Pad.Name);                  // should be designator / pin number
+                Rpt.Add('Layer         : ' + CurrentLib.Board.LayerName(Layer));
+                Rpt.Add('Pad.x         : ' + PadLeft(CoordUnitToString((Pad.x - BOrigin.X),   Units), 10) + '  Pad.y         : ' + PadLeft(CoordUnitToString((Pad.y - BOrigin.Y),   Units),10) );
+                Rpt.Add('All L offsetX : ' + PadLeft(CoordUnitToString(Pad.XPadOffsetAll,     Units), 10) + '  All L offsetY : ' + PadLeft(CoordUnitToString(Pad.YPadOffsetAll,     Units),10) );
+// not actually implemented.
+                Rpt.Add('OffsetX       : ' + PadLeft(CoordUnitToString(Pad.XPadOffset(Layer), Units), 10) + '  offsetY       : ' + PadLeft(CoordUnitToString(Pad.YPadOffset(Layer), Units),10) );
+                Rpt.Add('TearDrop      : ' + BoolToStr(    Pad.TearDrop, true) + '  (' + IntToStr(Pad.TearDrop) + ')' );
+                Rpt.Add('Rotation      : ' + PadLeft(IntToStr(         Pad.Rotation                            ), 10) );
+                Rpt.Add('Holesize      : ' + PadLeft(CoordUnitToString(Pad.Holesize,                      Units), 10) );
+                Rpt.Add('Hole Tol +ve  : ' + PadLeft(CoordUnitToString(Pad.HolePositiveTolerance,         Units), 10) );
+                Rpt.Add('Hole Tol -ve  : ' + PadLeft(CoordUnitToString(Pad.HoleNegativeTolerance,         Units), 10) );
+                Rpt.Add('HoleWidth     : ' + PadLeft(CoordUnitToString(Pad.HoleWidth,                     Units), 10) );
+                Rpt.Add('Holetype      : ' + IntToStr(                 Pad.Holetype));     // TExtendedHoleType
+                Rpt.Add('DrillType     : ' + IntToStr(                 Pad.DrillType));    // TExtendedDrillType
+                Rpt.Add('Plated        : ' + BoolToStr(                Pad.Plated, true) +    '  (' + IntToStr(Pad.Plated) + ')');
 
-                Rpt.Add('Layer        : ' + CurrentLib.Board.LayerName(Layer));
-                Rpt.Add('Pad.x        : ' + PadLeft(CoordUnitToString(Pad.x,                 Units), 10) + '  Pad.y       : ' + PadLeft(CoordUnitToString(Pad.y,                 Units),10) );
-                Rpt.Add('Pad offsetX  : ' + PadLeft(CoordUnitToString(Pad.XPadOffset(Layer), Units), 10) + '  Pad offsetY : ' + PadLeft(CoordUnitToString(Pad.YPadOffset(Layer), Units),10) );
-                Rpt.Add('Holesize     : ' + PadLeft(CoordUnitToString(Pad.Holesize,          Units), 10) );
-                Rpt.Add('Holetype     : ' + IntToStr(Pad.Holetype));     // TExtendedHoleType
-                Rpt.Add('DrillType    : ' + IntToStr(Pad.DrillType));    // TExtendedDrillType
-                Rpt.Add('Plated       : ' + BoolToStr(Pad.Plated));
+                Rpt.Add('Pad ID        : ' + Pad.Identifier);
+                Rpt.Add('Pad desc      : ' + Pad.Descriptor);
+                Rpt.Add('Pad Detail    : ' + Pad.Detail);
+                Rpt.Add('Pad ObjID     : ' + Pad.ObjectIDString);
+                Rpt.Add('Pad Pin Desc  : ' + Pad.PinDescriptor);
 
-                Rpt.Add('Pad Name     : ' + Pad.Name);                  // should be designator / pin number
-                Rpt.Add('Pad ID       : ' + Pad.Identifier);
-                Rpt.Add('Pad desc     : ' + Pad.Descriptor);
-                Rpt.Add('Pad Detail   : ' + Pad.Detail);
-                Rpt.Add('Pad ObjID    : ' + Pad.ObjectIDString);
-                Rpt.Add('Pad Pin Desc : ' + Pad.PinDescriptor);
-
-                Rpt.Add('Pad Mode     : ' + IntToStr(Pad.Mode));
-                Rpt.Add('Pad Stack Size Top(X,Y): (' + CoordUnitToString(Pad.TopXSize,Units) + ',' + CoordUnitToString(Pad.TopYSize,Units) + ')');
-                Rpt.Add('Pad Stack Size Mid(X,Y): (' + CoordUnitToString(Pad.MidXSize,Units) + ',' + CoordUnitToString(Pad.MidYSize,Units) + ')');
-                Rpt.Add('Pad Stack Size Bot(X,Y): (' + CoordUnitToString(Pad.BotXSize,Units) + ',' + CoordUnitToString(Pad.BotYSize,Units) + ')');
+                Rpt.Add('Pad Mode      : ' + IntToStr(Pad.Mode));
+                Rpt.Add('Pad Stack Size Top(X,Y): (' + CoordUnitToString(Pad.TopXSize, Units) + ',' + CoordUnitToString(Pad.TopYSize, Units) + ')');
+                Rpt.Add('Pad Stack Size Mid(X,Y): (' + CoordUnitToString(Pad.MidXSize, Units) + ',' + CoordUnitToString(Pad.MidYSize, Units) + ')');
+                Rpt.Add('Pad Stack Size Bot(X,Y): (' + CoordUnitToString(Pad.BotXSize, Units) + ',' + CoordUnitToString(Pad.BotYSize, Units) + ')');
 
             end;
 
@@ -160,25 +193,75 @@ begin
                 Pad := Handle;
                 PadCache := Pad.Cache;
 
-// add these at some point..
+                Rpt.Add('Pad Cache Robot Flag           : ' + BoolToStr(Pad.PadCacheRobotFlag, true)  + '  (' + IntToStr(Pad.PadCacheRobotFlag) + ')');
+//      CPLV - Plane Layers (List) valid ?
+                Rpt.Add('Planes Valid                   : ' + GetCacheState(PadCache.PlanesValid) );
+//      CCSV - Plane Connection Style valid ?
+                Rpt.Add('Plane Style Valid              : ' + GetCacheState(PadCache.PlaneConnectionStyleValid) );
+                Rpt.Add('Plane Connection Style         : ' + GetPlaneConnectionStyle(PadCache.PlaneConnectionStyle) );
+                Rpt.Add('Plane Connect Style for Layer  : ' + GetPlaneConnectionStyle(Pad.PlaneConnectionStyleForLayer(Layer)) );
+                                                         
+(*
+        // Transfer Pad.Cache's Planes field (Word type) to the Planes variable (TPlanesConnectArray type).
+        PlanesArray := PadCache.Planes;
+        // Calculate the decimal value of the 'CPL' number.
+        CPL := 0;
+        For L := kMaxInternalPlane DownTo kMinInternalPlane Do
+        Begin
+            // Planes is a TPlanesConnectArray and each internal plane has a boolean value.
+            // at the moment PlanesArray[L] is always true which is not TRUE!
+            If (PlanesArray[L] = True) Then
+                CPL := (2 * CPL) + 1
+            Else
+                CPL := 2 * CPL;
+        End;
 
-                CoordToMils(Padcache.ReliefAirGap);
-                CoordToMils(Padcache.PowerPlaneReliefExpansion);
-                CoordToMils(Padcache.PowerPlaneClearance);
-                CoordToMils(Padcache.ReliefConductorWidth);
+        // Calculate the hexadecimal value of the 'CPL' number.
+        CPL_Hex := IntegerToHexString(CPL);
+        If (PadCache.PlanesValid <> eCacheInvalid) Then
+        Begin
+            LS := LS + #13 +   'Power Planes Connection Code (Decimal): ' + IntToStr(CPL);
+            LS := LS + #13 +   'Power Planes Connection Code (Base 16): ' + CPL_Hex;
+        End
+        Else
+        Begin
+            LS := LS + #13 + '{ Power Planes Connection Code (Decimal): ' + IntToStr(CPL) + ' }';
+            LS := LS + #13 + '{ Power Planes Connection Code (Base 16): ' + CPL_Hex + ' }';
+        End;
+*)
 
-                PadCache.PasteMaskExpansionValid;   // eCacheManual;
-                CoordToMils(PadCache.PasteMaskExpansion);
-                PadCache.SolderMaskExpansionValid;   // eCacheManual;
-                CoordToMils(PadCache.SolderMaskExpansion);
+//     CCWV - Relief Conductor Width valid ?
+                Rpt.Add('Relief Conductor Width Valid   : ' + GetCacheState(PadCache.ReliefConductorWidthValid) );
+                Rpt.Add('Relief Conductor Width         : ' + CoordUnitToString(PadCache.ReliefConductorWidth, Units) );
+//     CENV - Relief Entries valid ?
+                Rpt.Add('Relief Entries Valid           : ' + GetCacheState(PadCache.ReliefEntriesValid) );
+                Rpt.Add('Relief Entries                 : ' + IntToStr(PadCache.ReliefEntries) );
 
-                Pad.SolderMaskExpansionFromHoleEdgeWithRule;
-                Pad.SolderMaskExpansionFromHoleEdge;
-                Pad.GetState_IsTenting_Top;
-                Pad.GetState_IsTenting_Bottom;
+//     CAGV - Relief Air Gap Valid ?
+                Rpt.Add('Relief Air Gap Valid           : ' + GetCacheState(PadCache.ReliefAirGapValid) );
+                Rpt.Add('Relief Air Gap                 : ' + CoordUnitToString(PadCache.ReliefAirGap, Units) );
+//     CPRV - Power Plane Relief Expansion Valid ?
+                Rpt.Add('Power Plane Relief Exp. Valid  : ' + GetCacheState(PadCache.PowerPlaneReliefExpansionValid) );
+                Rpt.Add('Power Plane Relief Expansion   : ' + CoordUnitToString(PadCache.PowerPlaneReliefExpansion, Units) );
+//     CPCV - Power Plane Clearance Valid ?
+                Rpt.Add('Power Plane Clearance Valid    : '  + GetCacheState(PadCache.PowerPlaneClearanceValid) );
+                Rpt.Add('Power Plane Clearance          : ' + CoordUnitToString(PadCache.PowerPlaneClearance, Units) );
+//     CSEV - Solder Mask Expansion Valid ?
+                Rpt.Add('Solder Mask Expansion Valid    : ' + GetCacheState(PadCache.SolderMaskExpansionValid) );
+                Rpt.Add('Solder Mask Expansion          : ' + CoordUnitToString(PadCache.SolderMaskExpansion, Units) );
 
-                Rpt.Add('PEX  : ' + CoordUnitToString(PadCache.PasteMaskExpansion,  Units) );
-                Rpt.Add('SMEX : ' + CoordUnitToString(PadCache.SolderMaskExpansion, Units) );
+                Rpt.Add('SMEX from Hole Edge            : ' + BoolToStr(Pad.SolderMaskExpansionFromHoleEdge, true) );
+                Rpt.Add('SMEX from Hole Edge with Rule  : ' + BoolToStr(Pad.SolderMaskExpansionFromHoleEdgeWithRule, true) );
+                Rpt.Add('IsTenting                      : ' + BoolToStr(Pad.GetState_IsTenting, true) );
+                Rpt.Add('IsTenting Top                  : ' + BoolToStr(Pad.GetState_IsTenting_Top, true) );
+                Rpt.Add('IsTenting Bottom               : ' + BoolToStr(Pad.GetState_IsTenting_Bottom, true) );
+
+//     CPEV - Paste Mask Expansion Valid ?
+                Rpt.Add('Paste Mask Expansion Valid     : ' + GetCacheState(PadCache.PasteMaskExpansionValid) );
+                Rpt.Add('Paste Mask Expansion           : ' + CoordUnitToString(PadCache.PasteMaskExpansion, Units) );
+
+//                Rpt.Add('PEX  : ' + CoordUnitToString(PadCache.PasteMaskExpansion,  Units) );
+//                Rpt.Add('SMEX : ' + CoordUnitToString(PadCache.SolderMaskExpansion, Units) );
             end;
 
             Handle := Iterator.NextPCBObject;
@@ -196,9 +279,9 @@ begin
 
     for I := 0 to (BadFPList.Count - 1) do
     begin
-        Rpt.Insert((I + 3), BadFPList.Strings(I));
+        Rpt.Insert((I + 2), BadFPList.Strings(I));
     end;
-    if (BadFPList.Count > 0) then Rpt.Insert(3, 'bad footprints detected');  
+    if (BadFPList.Count > 0) then Rpt.Insert(2, 'bad footprints detected');
 
     BadFPList.Free;
     EndHourGlass;
