@@ -193,13 +193,13 @@ begin
                 Pad := Handle;
                 PadCache := Pad.Cache;
 
-                Rpt.Add('Pad Cache Robot Flag           : ' + BoolToStr(Pad.PadCacheRobotFlag, true)  + '  (' + IntToStr(Pad.PadCacheRobotFlag) + ')');
+                Rpt.Add('Pad Cache Robot Flag               : ' + BoolToStr(Pad.PadCacheRobotFlag, true)  + '  (' + IntToStr(Pad.PadCacheRobotFlag) + ')');
 //      CPLV - Plane Layers (List) valid ?
-                Rpt.Add('Planes Valid                   : ' + GetCacheState(PadCache.PlanesValid) );
+                Rpt.Add('Planes Valid                  CPLV : ' + GetCacheState(PadCache.PlanesValid) );
 //      CCSV - Plane Connection Style valid ?
-                Rpt.Add('Plane Style Valid              : ' + GetCacheState(PadCache.PlaneConnectionStyleValid) );
-                Rpt.Add('Plane Connection Style         : ' + GetPlaneConnectionStyle(PadCache.PlaneConnectionStyle) );
-                Rpt.Add('Plane Connect Style for Layer  : ' + GetPlaneConnectionStyle(Pad.PlaneConnectionStyleForLayer(Layer)) );
+                Rpt.Add('Plane Style Valid             CCSV : ' + GetCacheState(PadCache.PlaneConnectionStyleValid) );
+                Rpt.Add('Plane Connection Style        CCS  : ' + GetPlaneConnectionStyle(PadCache.PlaneConnectionStyle) );
+                Rpt.Add('Plane Connect Style for Layer      : ' + GetPlaneConnectionStyle(Pad.PlaneConnectionStyleForLayer(Layer)) );
                                                          
 (*
         // Transfer Pad.Cache's Planes field (Word type) to the Planes variable (TPlanesConnectArray type).
@@ -231,34 +231,33 @@ begin
 *)
 
 //     CCWV - Relief Conductor Width valid ?
-                Rpt.Add('Relief Conductor Width Valid   : ' + GetCacheState(PadCache.ReliefConductorWidthValid) );
-                Rpt.Add('Relief Conductor Width         : ' + CoordUnitToString(PadCache.ReliefConductorWidth, Units) );
+                Rpt.Add('Relief Conductor Width Valid  CCWV : ' + GetCacheState(PadCache.ReliefConductorWidthValid) );
+                Rpt.Add('Relief Conductor Width        CCW  : ' + CoordUnitToString(PadCache.ReliefConductorWidth, Units) );
 //     CENV - Relief Entries valid ?
-                Rpt.Add('Relief Entries Valid           : ' + GetCacheState(PadCache.ReliefEntriesValid) );
-                Rpt.Add('Relief Entries                 : ' + IntToStr(PadCache.ReliefEntries) );
-
+                Rpt.Add('Relief Entries Valid          CENV : ' + GetCacheState(PadCache.ReliefEntriesValid) );
+                Rpt.Add('Relief Entries                CEN  : ' + IntToStr(PadCache.ReliefEntries) );
 //     CAGV - Relief Air Gap Valid ?
-                Rpt.Add('Relief Air Gap Valid           : ' + GetCacheState(PadCache.ReliefAirGapValid) );
-                Rpt.Add('Relief Air Gap                 : ' + CoordUnitToString(PadCache.ReliefAirGap, Units) );
+                Rpt.Add('Relief Air Gap Valid          CAGV : ' + GetCacheState(PadCache.ReliefAirGapValid) );
+                Rpt.Add('Relief Air Gap                CAG  : ' + CoordUnitToString(PadCache.ReliefAirGap, Units) );
 //     CPRV - Power Plane Relief Expansion Valid ?
-                Rpt.Add('Power Plane Relief Exp. Valid  : ' + GetCacheState(PadCache.PowerPlaneReliefExpansionValid) );
-                Rpt.Add('Power Plane Relief Expansion   : ' + CoordUnitToString(PadCache.PowerPlaneReliefExpansion, Units) );
+                Rpt.Add('Power Plane Relief Exp. Valid CPRV : ' + GetCacheState(PadCache.PowerPlaneReliefExpansionValid) );
+                Rpt.Add('Power Plane Relief Expansion  CPR  : ' + CoordUnitToString(PadCache.PowerPlaneReliefExpansion, Units) );
 //     CPCV - Power Plane Clearance Valid ?
-                Rpt.Add('Power Plane Clearance Valid    : '  + GetCacheState(PadCache.PowerPlaneClearanceValid) );
-                Rpt.Add('Power Plane Clearance          : ' + CoordUnitToString(PadCache.PowerPlaneClearance, Units) );
+                Rpt.Add('Power Plane Clearance Valid   CPCV : '  + GetCacheState(PadCache.PowerPlaneClearanceValid) );
+                Rpt.Add('Power Plane Clearance         CPC  : ' + CoordUnitToString(PadCache.PowerPlaneClearance, Units) );
 //     CSEV - Solder Mask Expansion Valid ?
-                Rpt.Add('Solder Mask Expansion Valid    : ' + GetCacheState(PadCache.SolderMaskExpansionValid) );
-                Rpt.Add('Solder Mask Expansion          : ' + CoordUnitToString(PadCache.SolderMaskExpansion, Units) );
+                Rpt.Add('Solder Mask Expansion Valid   CSEV : ' + GetCacheState(PadCache.SolderMaskExpansionValid) );
+                Rpt.Add('Solder Mask Expansion         CSE  : ' + CoordUnitToString(PadCache.SolderMaskExpansion, Units) );
 
-                Rpt.Add('SMEX from Hole Edge            : ' + BoolToStr(Pad.SolderMaskExpansionFromHoleEdge, true) );
-                Rpt.Add('SMEX from Hole Edge with Rule  : ' + BoolToStr(Pad.SolderMaskExpansionFromHoleEdgeWithRule, true) );
-                Rpt.Add('IsTenting                      : ' + BoolToStr(Pad.GetState_IsTenting, true) );
-                Rpt.Add('IsTenting Top                  : ' + BoolToStr(Pad.GetState_IsTenting_Top, true) );
-                Rpt.Add('IsTenting Bottom               : ' + BoolToStr(Pad.GetState_IsTenting_Bottom, true) );
+                Rpt.Add('SMEX from Hole Edge                : ' + BoolToStr(Pad.SolderMaskExpansionFromHoleEdge, true) );
+                Rpt.Add('SMEX from Hole Edge with Rule      : ' + BoolToStr(Pad.SolderMaskExpansionFromHoleEdgeWithRule, true) );
+                Rpt.Add('IsTenting                          : ' + BoolToStr(Pad.GetState_IsTenting, true) );
+                Rpt.Add('IsTenting Top                      : ' + BoolToStr(Pad.GetState_IsTenting_Top, true) );
+                Rpt.Add('IsTenting Bottom                   : ' + BoolToStr(Pad.GetState_IsTenting_Bottom, true) );
 
 //     CPEV - Paste Mask Expansion Valid ?
-                Rpt.Add('Paste Mask Expansion Valid     : ' + GetCacheState(PadCache.PasteMaskExpansionValid) );
-                Rpt.Add('Paste Mask Expansion           : ' + CoordUnitToString(PadCache.PasteMaskExpansion, Units) );
+                Rpt.Add('Paste Mask Expansion Valid    CPEV : ' + GetCacheState(PadCache.PasteMaskExpansionValid) );
+                Rpt.Add('Paste Mask Expansion          CPE  : ' + CoordUnitToString(PadCache.PasteMaskExpansion, Units) );
 
 //                Rpt.Add('PEX  : ' + CoordUnitToString(PadCache.PasteMaskExpansion,  Units) );
 //                Rpt.Add('SMEX : ' + CoordUnitToString(PadCache.SolderMaskExpansion, Units) );
