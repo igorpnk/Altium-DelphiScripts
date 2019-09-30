@@ -18,6 +18,7 @@
  08/09/2019  : use _V7 layerstack for mech layer info.
  11/09/2019  : use & report the LayerIDs & iterate to 64 mech layers.
  28/09/2019  : Added colour & display status to layerclass outputs
+ 30/09/2019  : Resolved the V7_LayerID numbers & fixed colour error in LayerClass
 
          tbd :  Use Layer Classes test in AD17 & AD19
 
@@ -52,7 +53,7 @@ begin
     eLayerClass_InternalPlane : Result := 'Internal Plane';
     eLayerClass_SolderMask    : Result := 'Solder Mask';
     eLayerClass_Overlay       : Result := 'Overlay';
-    eLayerClass_PasteMask     : Result := 'Paste mask';
+    eLayerClass_PasteMask     : Result := 'Paste Mask';
     else                        Result := 'Unknown';
     end;
 end;
@@ -71,7 +72,6 @@ var
    temp        : integer;
    LayerName   : WideString;
    LayerPos    : WideString;
-   Layer       : integer;
    LColour     : WideString;
    LName       : WideString;
    IsDisplayed : boolean;
@@ -108,12 +108,15 @@ begin
 
         While (LayerObj <> Nil ) do
         begin
-            if LayerClass <> eLayerClass_Mechanical then
-                Layer := LayerObj.V6_LayerID             //  V7_LayerID;
-            else
-                Layer :=  LayerUtils.MechanicalLayer(i);
+//            if LayerClass <> eLayerClass_Mechanical then
+//                Layer := LayerObj.V6_LayerID             //  V7_LayerID;
+//            else
+//                Layer :=  LayerUtils.MechanicalLayer(i);
+     //       LayerObj.V7_LayerID.DEBUG_V6_LAYER;
+     //       LayerObj.V7_LayerID;
+            Layer := LayerObj.V7_LayerID.ID;
 
-            LayerObj.IsInLayerStack;
+            LayerObj.IsInLayerStack;       // check always true.
 
             LayerPos :='';
             if LayerClass = eLayerClass_Electrical then
@@ -121,13 +124,12 @@ begin
 
             LName := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Short) ; // TLayernameDisplayMode: eLayerNameDisplay_Long/Short/Medium
             IsDisplayed := Board.LayerIsDisplayed(Layer);
-           // ColorToString(Board.L .LayerColor(Layer]));   // TV6_Layer
+           // ColorToString(Board.LayerColor(Layer]));   // TV6_Layer
             LColour := ColorToString(PCBSysOpts.LayerColors(Layer));
 
             TempS.Add(Padright(IntToStr(LayerClass) + '.' + IntToStr(i),4) + ' | ' + Padright(LayerPos,3) + ' ' + PadRight(LayerObj.Name, 15)
-                      + PadRight(LName, 20) + '  ' + PadRight(BoolToStr(IsDisplayed,true), 6) + '  ' + LColour);
+                      + PadRight(LName, 20) + '  ' + PadRight(BoolToStr(IsDisplayed,true), 6) + '  ' + PadRight(LColour, 15) + ' ' +PadLeft(IntToStr(Layer),9));
 
-//       if LayerObj <> Nil then MechLayer := LayerObj;
             LayerObj := LayerStack.Next(Layerclass, LayerObj);
             Inc(i);
         end;
@@ -148,17 +150,19 @@ begin
 // Old? Methods for Mechanical Layers.
 
     LayerStack := Board.LayerStack_V7;
-    TempS.Add('Idx LayerID    boardlayername      layername           V6_LayerID');
+    TempS.Add('Calc LayerID    boardlayername      layername           V7_LayerID');
     for i := 1 to 64 do
     begin
         ML1 := LayerUtils.MechanicalLayer(i);
-        Layer := i + MinMechanicalLayer - 1;        // just calcs same as above until eMech16.
         LayerObj := LayerStack.LayerObject_V7[ML1];
         LayerName := 'broken method NO name';
         if LayerObj <> Nil then                     // 2 different indices for the same object info, Fg Madness!!!
         begin
             LayerName := LayerObj.Name;
-            Layer7 := LayerObj.V7_LayerID;      // needs wrapper function  __TV7_Layer_Wrapper() how to use?
+
+//            Layer := i + MinMechanicalLayer - 1;        // just calcs same as above until eMech16.
+//   needs wrapper function  __TV7_Layer_Wrapper()
+            Layer := LayerObj.V7_LayerID.ID;
 
       //  ('MechLayer' + IntToStr(i), 'Enabled', MechLayer.MechanicalLayerEnabled);
       //  ('MechLayer' + IntToStr(i), 'Show',    MechLayer.IsDisplayed[Board]);
@@ -167,7 +171,7 @@ begin
       //  ('MechLayer' + IntToStr(i), 'Color',   ColorToString(Board.LayerColor[ML1]) );
 
         end;
-        TempS.Add(PadRight(IntToStr(i),3) + ' ' + PadRight(IntToStr(ML1),10) + ' ' + PadRight(Board.LayerName(ML1),20) + ' ' + PadRight(LayerName,20) + ' ' + IntToStr(LayerObj.V6_LayerID));
+        TempS.Add(PadRight(IntToStr(i),3) + ' ' + PadRight(IntToStr(ML1),10) + ' ' + PadRight(Board.LayerName(ML1),20) + ' ' + PadRight(LayerName,20) + ' ' + PadLeft(IntToStr(Layer), 8));
         // LayerObj.UsedByPrims;
     end;
 
