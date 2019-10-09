@@ -160,18 +160,21 @@ begin
                 // ePadMode_LocalStack;       // top-mid-bottom stack
                 Rpt.Add('');
                 Rpt.Add('Pad Name      : ' + Pad.Name);                  // should be designator / pin number
+                Rpt.Add('Enabled       : ' + BoolToStr(Pad.Enabled, true) + '  (E=' + IntToStr(Pad.Enabled) + ') (ED=' + IntToStr(Pad.EnableDraw) + ')' );
                 Rpt.Add('Layer         : ' + CurrentLib.Board.LayerName(Layer));
                 Rpt.Add('Pad.x         : ' + PadLeft(CoordUnitToString((Pad.x - BOrigin.X),   Units), 10) + '  Pad.y         : ' + PadLeft(CoordUnitToString((Pad.y - BOrigin.Y),   Units),10) );
                 Rpt.Add('All L offsetX : ' + PadLeft(CoordUnitToString(Pad.XPadOffsetAll,     Units), 10) + '  All L offsetY : ' + PadLeft(CoordUnitToString(Pad.YPadOffsetAll,     Units),10) );
 // not actually implemented.
                 Rpt.Add('OffsetX       : ' + PadLeft(CoordUnitToString(Pad.XPadOffset(Layer), Units), 10) + '  offsetY       : ' + PadLeft(CoordUnitToString(Pad.YPadOffset(Layer), Units),10) );
                 Rpt.Add('TearDrop      : ' + BoolToStr(    Pad.TearDrop, true) + '  (' + IntToStr(Pad.TearDrop) + ')' );
-                Rpt.Add('Rotation      : ' + PadLeft(IntToStr(         Pad.Rotation                            ), 10) );
+                Rpt.Add('Rotation      : ' + PadLeft(FloatToStr(       Pad.Rotation                            ), 10) + ' deg');
                 Rpt.Add('Holesize      : ' + PadLeft(CoordUnitToString(Pad.Holesize,                      Units), 10) );
                 Rpt.Add('Hole Tol +ve  : ' + PadLeft(CoordUnitToString(Pad.HolePositiveTolerance,         Units), 10) );
                 Rpt.Add('Hole Tol -ve  : ' + PadLeft(CoordUnitToString(Pad.HoleNegativeTolerance,         Units), 10) );
                 Rpt.Add('HoleWidth     : ' + PadLeft(CoordUnitToString(Pad.HoleWidth,                     Units), 10) );
+                Rpt.Add('HoleRotation  : ' + PadLeft(FloatToStr(       Pad.HoleRotation                        ), 10) + ' deg' );
                 Rpt.Add('Holetype      : ' + IntToStr(                 Pad.Holetype));     // TExtendedHoleType
+             
                 Rpt.Add('DrillType     : ' + IntToStr(                 Pad.DrillType));    // TExtendedDrillType
                 Rpt.Add('Plated        : ' + BoolToStr(                Pad.Plated, true) +    '  (' + IntToStr(Pad.Plated) + ')');
 
