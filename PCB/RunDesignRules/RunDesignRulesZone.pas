@@ -35,11 +35,11 @@ const
     ErrorCountPrompt = 20;       // modulus this confirm dialog
     cESC      = -1;
     cAllRules = -1;
-    cAltKey   = 1;
-    cShiftKey = 2;
-    cCntlKey  = 3;
-    cTouch    = 1;            // not used; for alt to spatialiterator
-    cInside   = 2;
+    cAltKey   =  1;
+    cShiftKey =  2;
+    cCntlKey  =  3;
+    cTouch    =  1;            // not used; for alt to spatialiterator
+    cInside   =  2;
 
 var
     Board          : IPCB_Board;
@@ -276,7 +276,7 @@ var
     Primitives : TObjectList;
     Violation  : IPCB_Violation;
     ViolDesc   : WideString;
-    ViolName : WideString;
+    ViolName   : WideString;
     MaxGap     : single;
     I, J, K, R : integer;
     GetOutOfLoops : boolean;
