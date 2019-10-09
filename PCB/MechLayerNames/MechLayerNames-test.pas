@@ -10,15 +10,16 @@
   Modified by: B Miller
 
  v 0.22 
- 03/07/2017  :  mod to fix layer names output, why was import okay ??
- 23/02/2018  :  added MechLayer Pairs & colours
- 27/02/2018  :  MechPair detect logic; only remove existing if any MPs detected in file
- 16/06/2019  :  Test for AD19 etc.
- 01/07/2019  :  messed with MechPair DNW; added MinMax MechLayer constants to report
+ 03/07/2017  : mod to fix layer names output, why was import okay ??
+ 23/02/2018  : added MechLayer Pairs & colours
+ 27/02/2018  : MechPair detect logic; only remove existing if any MPs detected in file
+ 16/06/2019  : Test for AD19 etc.
+ 01/07/2019  : messed with MechPair DNW; added MinMax MechLayer constants to report
  08/09/2019  : use _V7 layerstack for mech layer info.
  11/09/2019  : use & report the LayerIDs & iterate to 64 mech layers.
  28/09/2019  : Added colour & display status to layerclass outputs
  30/09/2019  : Resolved the V7_LayerID numbers & fixed colour error in LayerClass
+ 02/10/2019  : Added mechlayer kind for AD19+
 
          tbd :  Use Layer Classes test in AD17 & AD19
 
@@ -27,18 +28,25 @@ Note: can export 1 to 64 mech layers in AD17/18/19
 ..................................................................................}
 
 {.................................................................................}
+const
+    AD19VersionMajor  = 19;
+    NoMechLayerKind   = 0;      // enum const does not exist for AD17/18
+
 var
-    PCBSysOpts : IPCB_SystemOptions;
-    Board      : IPCB_Board;
-    LayerStack : IPCB_LayerStack;
-    LayerObj   : IPCB_LayerObject;
-    LayerClass : TLayerClassID;
-    MechLayer  : IPCB_MechanicalLayer;
-    MechPairs  : IPCB_MechanicalLayerPairs;
-    MechPair   : TMechanicalLayerPair;
-    Layer      : TLayer;
-    Layer7     : TV7_Layer;
-    ML1, ML2   : integer;
+    PCBSysOpts    : IPCB_SystemOptions;
+    Board         : IPCB_Board;
+    LayerStack    : IPCB_LayerStack;
+    LayerObj      : IPCB_LayerObject;
+    LayerClass    : TLayerClassID;
+    MechLayer     : IPCB_MechanicalLayer;
+    MechLayerKind : TMechanicalKind;
+    MLayerKindStr : WideString;
+    MechPairs     : IPCB_MechanicalLayerPairs;
+    MechPair      : TMechanicalLayerPair;
+    VerMajor      : WideString;
+    Layer         : TLayer;
+    Layer7        : TV7_Layer;
+    ML1, ML2      : integer;
 
 function LayerClassName (LClass : TLayerClassID) : WideString;
 begin
@@ -58,6 +66,14 @@ begin
     end;
 end;
 
+function Version(const dummy : boolean) : TStringList;
+begin
+    Result := TStringList.Create;
+    Result.Delimiter := '.';
+    Result.Duplicates := dupAccept;
+    Result.DelimitedText := Client.GetProductVersion;
+end;
+
 Procedure ExportMechLayerInfoTest;
 var
    WS          : IWorkspace;
@@ -75,6 +91,7 @@ var
    LColour     : WideString;
    LName       : WideString;
    IsDisplayed : boolean;
+   LegacyMLS   : boolean;
 
 begin
     Board := PCBServer.GetCurrentPCBBoard;
@@ -83,12 +100,17 @@ begin
     PCBSysOpts := PCBServer.SystemOptions;
     If PCBSysOpts = Nil Then exit;
 
+    VerMajor := Version(true).Strings(0);
+    LegacyMLS     := true;
+    MechLayerKind := NoMechLayerKind;
+    if (VerMajor >= AD19VersionMajor) then
+        LegacyMLS     := false;
+
     WS := GetWorkSpace;
     FileName := WS.DM_FocusedDocument.DM_FullPath;
     FileName := ExtractFilePath(FileName);
 
     TempS := TStringList.Create;
-
     TempS.Add(Client.GetProductVersion);
     TempS.Add('');
     TempS.Add(' ----- LayerStack(eLayerClass) ------');
@@ -102,7 +124,7 @@ begin
     begin
         TempS.Add('');
         TempS.Add('eLayerClass ' + IntToStr(LayerClass) + '  ' + LayerClassName(LayerClass));
-        TempS.Add('lc.i : |   name           short name           IsDisplayed?   Colour');
+        TempS.Add('lc.i : |   name           short name         IsDisplayed?   Colour');
         i := 1;
         LayerObj := LayerStack.First(LayerClass);
 
@@ -150,15 +172,18 @@ begin
 // Old? Methods for Mechanical Layers.
 
     LayerStack := Board.LayerStack_V7;
-    TempS.Add('Calc LayerID    boardlayername      layername           V7_LayerID');
+    TempS.Add('Calc LayerID    boardlayername      layername       kind     V7_LayerID');
     for i := 1 to 64 do
     begin
         ML1 := LayerUtils.MechanicalLayer(i);
         LayerObj := LayerStack.LayerObject_V7[ML1];
         LayerName := 'broken method NO name';
+        MechLayerKind := NoMechLayerKind;
+
         if LayerObj <> Nil then                     // 2 different indices for the same object info, Fg Madness!!!
         begin
             LayerName := LayerObj.Name;
+            if not LegacyMLS then MechLayerKind := LayerObj.Kind;
 
 //            Layer := i + MinMechanicalLayer - 1;        // just calcs same as above until eMech16.
 //   needs wrapper function  __TV7_Layer_Wrapper()
@@ -171,7 +196,8 @@ begin
       //  ('MechLayer' + IntToStr(i), 'Color',   ColorToString(Board.LayerColor[ML1]) );
 
         end;
-        TempS.Add(PadRight(IntToStr(i),3) + ' ' + PadRight(IntToStr(ML1),10) + ' ' + PadRight(Board.LayerName(ML1),20) + ' ' + PadRight(LayerName,20) + ' ' + PadLeft(IntToStr(Layer), 8));
+        TempS.Add(PadRight(IntToStr(i),3) + ' ' + PadRight(IntToStr(ML1),10) + ' ' + PadRight(Board.LayerName(ML1),20) 
+                           + ' ' + PadRight(LayerName,20) + ' ' + IntToStr(MechLayerKind) + ' ' + PadLeft(IntToStr(Layer), 8) );
         // LayerObj.UsedByPrims;
     end;
 
@@ -229,7 +255,7 @@ End;
 
 //        MechLayer := LayerStack.LayerObject[Layer];      // this method does not work above eMech24 !!
 
-//        if MechPairs.LayerUsed(Layer) then         // always false ! ; pass it (MechLayer) & will crash!
+//        if MechPairs.LayerUsed(MechLayer) then         // always false (Layer) ! ; pass it (MechLayer) & will crash!
 //        begin
 
             for j := (i + 1) to 64 do
@@ -242,7 +268,7 @@ End;
 
     WS := GetWorkSpace;
     FileName := WS.DM_FocusedDocument.DM_FullPath;
-    FileName := ExtractFilePath(FileName) + '\mechlayername.txt';
+    FileName := ExtractFilePath(FileName) + '\mechlayertest.txt';
 
     TempS.SaveToFile(FileName);
     Exit;
