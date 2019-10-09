@@ -12,22 +12,28 @@ B.L. Miller
 04/08/2019 v0.2  Additional reporting of Pads with NoNet.
 07/08/2019 v0.3  Two script call entry points DRCReport & DRCViolateNoRoute
 21/08/2019 v0.31 Tidied reporting some.. added DRC marker code still DNW!
+26/08/2019 v0.32 Added all associated Nets to Scoped Objects.
+25/09/2019 v0.33 Allow for multiple Rules of same rulekind
+10/10/2029 v0.34 Add green DRC dots to terminating pads without duplicating violations
 
-tbd:  DRCError Markers not displaying from violations ?
+Displays yellow parallel bars for broken Nets & green DRC dots on pad ends of Nets
+
 }
 const
-    RuleToRunRC = eRule_BrokenNets;     // only one tested/attempted.
+    RuleToRunRC  = eRule_BrokenNets;     // only one tested/attempted.
+    RuleToReport = eRule_BrokenNets;
+    cAllRules    = -1;
+    ErrorCountPrompt = 50;
 
 var
-    Board : IPCB_Board;
-    Rpt   : TStringList;
+    Board     : IPCB_Board;
+    Rpt       : TStringList;
+    dlgResult : boolean;   // integer for cancel version FFS
 
 function RuleKindToString (ARuleKind : TRuleKind) : String;
 // more failings of API
 begin
-    Result := '';
 //    Result := cRuleIdStrings[ARuleKind];
-
     case ARuleKind of
         eRule_Clearance                : Result := 'Clearance';
         eRule_ParallelSegment          : Result := 'ParallelSegment';
@@ -74,38 +80,51 @@ begin
         eRule_MaxMinHoleSize           : Result := 'HoleSize';
         eRule_TestPointStyle           : Result := 'Testpoint';
         eRule_TestPointUsage           : Result := 'TestPointUsage';
-        eRule_UnconnectedPin           : Result := 'UnConnectedPin';
-        eRule_SMDToPlane               : Result := 'SMDToPlane';
-        eRule_SMDNeckDown              : Result := 'SMDNeckDown';
-        eRule_LayerPair                : Result := 'LayerPairs';
-        eRule_FanoutControl            : Result := 'FanoutControl';
+        eRule_UnconnectedPin           : Result := 'UnConnected Pin';
+        eRule_SMDToPlane               : Result := 'SMD to Plane';
+        eRule_SMDNeckDown              : Result := 'SMD NeckDown';
+        eRule_LayerPair                : Result := 'Layer Pairs';
+        eRule_FanoutControl            : Result := 'Fanout Control';
         eRule_MaxMinHeight             : Result := 'Height';
-        eRule_DifferentialPairsRouting : Result := 'DiffPairsRouting';
+        eRule_DifferentialPairsRouting  : Result := 'Diff Pairs Routing';
+        eRule_HoleToHoleClearance       : Result := 'Hoe to Hole Clearance';
+        eRule_MinimumSolderMaskSliver   : Result := 'Minimum SolderMask Sliver';
+        eRule_SilkToSolderMaskClearance : Result := 'Silk to SolderMask Clearance';
+        eRule_SilkToSilkClearance       : Result := 'Silk to Silk Clearance';
+        eRule_NetAntennae               : Result := 'Net Antennae';
+        eRule_AssyTestPointStyle        : Result := 'Assy TestPoint Style';
+        eRule_AssyTestPointUsage        : Result := 'Assy TestPoint Usage';
+        eRule_SilkToBoardRegion         : Result := 'Silk To Board Region';
+        eRule_SMDPADEntry               : Result := 'SMD Pad Entry';
+        eRule_None                      : Result := 'NO Rule';
+        eRule_ModifiedPolygon           : Result := 'Modified Polygon';
+        eRule_BoardOutlineClearance     : Result := 'Board Outline Clearance';
+        eRule_BackDrilling              : Result := 'Back Drilling';
+    else Result := '';
     End;
 End;
 
-function GetMatchingRulefromBoard (const RuleKind : TRuleKind) : IPCB_Rule;
+function GetMatchingRulesFromBoard (const RuleKind : TRuleKind) : TObjectList;
 var
     Iterator : IPCB_BoardIterator;
     Rule     : IPCB_Rule;
-
 begin
-    Result := Nil;
+    Result := TObjectList.Create;;
 
     Iterator := Board.BoardIterator_Create;
     Iterator.AddFilter_ObjectSet(MkSet(eRuleObject));
     Iterator.AddFilter_LayerSet(AllLayers);
     Iterator.AddFilter_Method(eProcessAll);
     Rule := Iterator.FirstPCBObject;
-    While (Rule <> Nil) Do
-    Begin
-        if Rule.RuleKind = RuleKind then
-        begin
-            Result := Rule;
-            break;
-        end;
+    while (Rule <> Nil) Do
+    begin
+        if RuleKind = cAllRules then
+            Result.Add(Rule)
+        else
+            if Rule.RuleKind = RuleKind then Result.Add(Rule);
+
         Rule := Iterator.NextPCBObject;
-    End;
+    end;
     Board.BoardIterator_Destroy(Iterator);
 end;
 
@@ -113,8 +132,8 @@ function GetScopedObjects (Rule : IPCB_Rule, const scope : integer) : TObjectLis
 var
     Iterator      : IPCB_BoardIterator;
     Prim          : IPCB_Primitive;
+    Net           : IPCB_net;
     ScopeIncludes : boolean;
-    PrimList      : TObjectList;
 
 begin
     Result := TObjectList.Create;
@@ -128,11 +147,35 @@ begin
     Begin
         ScopeIncludes := false;
         if scope = 1 then
+        begin
             if Rule.Scope1Includes(Prim) then ScopeIncludes := true;
+//      easier to retain pin/pad now so can display DRC markers on pads!
+            if (Prim.ObjectId <> eNetObject) and Prim.InNet then
+            begin
+                Net := Prim.Net;
+                if Rule.Scope1Includes(Net) then ScopeIncludes := true;
+            end;
+        end;
         if scope = 2 then
+        begin
             if Rule.Scope2Includes(Prim) then ScopeIncludes := true;
+            if (Prim.ObjectId <> eNetObject) and Prim.InNet then
+            begin
+                Net := Prim.Net;
+                if Rule.Scope2Includes(Net) then ScopeIncludes := true;
+            end;
+        end;
+
         if ScopeIncludes then
-            Result.Add(Prim);
+            if Result.IndexOf(Prim) = -1 then
+                Result.Add(Prim);
+
+  //  add Net in rule runner so have the pin handle.
+  //          if (Prim.ObjectId <> eNetObject) and Prim.InNet then
+  //          begin
+  //              Prim := Prim.Net;
+  //              ScopeIncludes := true;
+  //          end;
 
         Prim := Iterator.NextPCBObject;
     End;
@@ -144,11 +187,14 @@ var
     RuleKind    : TRuleKind;
     Prim, Prim2 : IPCB_Primitive;
     Violation   : IPCB_Violation;
-    ViolDesc    : TPCBString;
+    ViolDesc    : WideString;
+    ViolName    : WideString;
     txt         : WideString;
-    I, J        : integer;
-    VCount      : integer;
-
+    I, J          : integer;
+    VCount        : integer;
+    GetOutOfLoops : boolean;
+    Redos         : integer;
+    Done          : boolean;
 begin
     VCount := 0;
     RuleKind := Rule.RuleKind;
@@ -156,26 +202,49 @@ begin
     for I := 0 to (ScopeList.Count - 1) do
     begin
         Prim := ScopeList.Items(I);
-     //   Rule.Scope1Includes(Prim);
-        Rule.CheckUnaryScope (Prim);
-        // Rule := Board.FindDominantRuleForObjectPair(Prim1, Prim2, RuleKind);
-        // Rule := Board.FindDominantRuleForObject(Prim1, RuleKind);
-        Violation := Rule.ActualCheck (Prim, nil);
-        if Violation <> nil then
-        begin
-            inc(VCount);
-            Board.AddPCBObject(Violation);
-            Prim.SetState_DRCError(true);
-            Prim.GraphicallyInvalidate;
+        Prim2 := Prim;
+        Redos := 1;
+        repeat
+            Violation := nil;
+            if Rule.CheckUnaryScope (Prim2) then
+                Violation := Rule.ActualCheck (Prim2, nil);
+            if Violation <> nil then
+            begin
+// want to DRC error mark each Net pad end but not make extra violations.
+                if Prim = Prim2 then
+                begin
+                    inc(VCount);
+                    Board.AddPCBObject(Violation);
+                    Rule.Descriptor;
+                    Violation.Detail;
+                    ViolDesc := Violation.Description;
+                    ViolDesc := Copy(ViolDesc, 0, 60);
+                    ViolDesc := PadRight(ViolDesc, 60);
+                    ViolName := Violation.Name;
+                    Rpt.Add('U ' + IntToStr(VCount) + ' ' + PadRight(Prim2.ObjectIDString, 15) + '            ' + PadRight(ViolName, 20) + ' '
+                            + ViolDesc + '   ' + Rule.Name + ' ' + RuleKindToString(RuleKind));
+                end;
+                Prim.SetState_DRCError(true);
+                Prim.GraphicallyInvalidate;
+            end;
 
-            Rule.Descriptor;
-            Violation.Detail;
-            ViolDesc := Violation.Description;
-            txt := ViolDesc + ' ';
-            txt := PadRight(txt, 50);
-            Rpt.Add('U ' + IntToStr(VCount) + ' ' + PadRight(Prim.ObjectIDString, 10) + '            ' + PadRight(Violation.Name, 20) + ' '
-                    + txt + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
+            dec(Redos);
+            if (Prim2.ObjectId <> eNetObject) and Prim.InNet then
+            begin
+//                Rule.NetScope;   //      eNetScope_DifferentNetsOnly=0
+                inc(Redos);
+                Prim2 := Prim.Net;
+            end;
+        until (Redos < 1);
+
+        if (VCount > 0) and ((VCount mod ErrorCountPrompt) = 0) then
+        begin
+            dlgResult := ConfirmNoYesWithCaption('Lots of Violations (' + IntToStr(VCount) + ') ', 'Continue ? ');
+            BeginHourGlass(crHourGlass);
+            if not dlgresult then GetOutOfLoops := true;
         end;
+        if GetOutOfLoops then break;
+
     end;
     Rpt.Add(' Total Unary Rule Violation Count : ' + IntToStr(VCount));
 end;
@@ -198,11 +267,16 @@ begin
         for J := 0 to (Scope2List.Count - 1) do
         begin
             Prim2 := Scope2List.Items[J];
-            // Rule.CheckBinaryScope (Prim, Prim2);
             // Rule := Board.FindDominantRuleForObjectPair(Prim1, Prim2, RuleKind);
-            Violation := Rule.ActualCheck (Prim, Prim2);
+            Violation := nil;
+            if Rule.CheckBinaryScope (Prim, Prim2) then
+                Violation := Rule.ActualCheck (Prim, Prim2);
             if Violation <> nil then
             begin
+                ViolDesc := Violation.Description;
+                ViolDesc := Copy(ViolDesc, 0, 60);
+                ViolDesc := PadRight(ViolDesc, 60);
+                ViolName := Violation.Name;
                 inc(VCount);
                 Board.AddPCBObject(Violation);
                 Prim.SetState_DRCError(true);
@@ -219,11 +293,14 @@ procedure DRCReporter(Rpt : TStringList);
 var
     Iterator  : IPCB_BoardIterator;
     Violation : IPCB_Violation;
-    VioRptTxt : wideString;
+    ViolDesc  : WideString;
+    ViolName  : WideString;
+    VioRptTxt : WideString;
     Rule      : IPCB_Rule;
     PCBObj1   : IPCB_Primitive;
     PCBObj2   : IPCB_Primitive;
     Pad       : IPCB_Pad;
+    PinDesc   : WideString;
     FileName  : TPCB_String;
     Document  : IServerDocument;
     VCount    : integer;
@@ -238,7 +315,7 @@ begin
     Iterator.AddFilter_LayerSet(AllLayers);
     Iterator.AddFilter_Method(eProcessAll);
 
-    Rpt.Add('cnt  Obj1 Pad: Obj2 Pad:  Violation Descripton  &  Name:      Rule Name:   RuleType: ');
+    Rpt.Add('cnt  Obj1 Pad:         Obj2 Pad:          Violation Descripton  &  Name:      Rule Name:   RuleType: ');
 
     Violation := Iterator.FirstPCBObject;
     While Violation <> Nil Do
@@ -252,30 +329,36 @@ begin
 
         if Rule <> Nil then
         begin
-            if Rule.ObjectID = RuleToRunRC then
+            if Rule.ObjectID = RuleToReport then
             begin
                if PCBObj1.ObjectID = ePadObject then
                 begin
                     inc(VCount);
                     Pad := PCBObj1;
-                    VioRptTxt := PadRight(IntToStr(VCount), 3) + ' ' + PadRight(Pad.PinDescriptor, 10) + ' ';
+                    PinDesc := Pad.PinDescriptor;
+                    VioRptTxt := PadRight(IntToStr(VCount), 3) + ' ' + PadRight(PinDesc, 20) + ' ';
                 end;
 
                 if PCBObj2 <> Nil then
                 begin
                     if PCBObj2.ObjectID = ePadObject then
                     begin
-                        inc(VCount);
+                        // inc(VCount);
                         Pad := PCBObj2;
+                        PinDesc := Pad.PinDescriptor;
                         If VioRptTxt = '' then
-                            VioRptTxt := PadRight(IntToStr(VCount), 3) + ' ' + PadRight(Pad.PinDescriptor, 10) + '            '
+                            VioRptTxt := PadRight(IntToStr(VCount), 3) + ' ' + PadRight(PinDesc, 20) + '            '
                         else
-                            VioRptTxt := VioRptTxt + PadRight(Pad.PinDescriptor, 10) + ' ';
+                            VioRptTxt := VioRptTxt + PadRight(PinDesc, 20) + ' ';
                     end;
                 end;
                 if VioRptTxt <> '' then
                 begin
-                    VioRptTxt := VioRptTxt + PadRight(Violation.Name, 20) + ' ' + Violation.Description + '  ' + Rule.Name + '  ' + RuleKindToString(Rule.RuleKind);
+                    ViolDesc := Violation.Description;
+                    ViolDesc := Copy(ViolDesc, 0, 60);
+                    ViolDesc := PadRight(ViolDesc, 60);
+                    ViolName := Violation.Name;
+                    VioRptTxt := VioRptTxt + PadRight(ViolName, 20) + ' ' + ViolDesc + '  ' + Rule.Name + '  ' + RuleKindToString(Rule.RuleKind);
                     Rpt.Add(VioRptTxt);
                 end;
             end;
@@ -288,6 +371,7 @@ begin
 // pads with no net
     Rpt.Add('Pads with NoNet');
     Rpt.Add('');
+    Rpt.Add('index   Pad Name:              Detail :  ');
     VCount := 0;
 
     Iterator.AddFilter_ObjectSet(MkSet(ePadObject));
@@ -299,7 +383,8 @@ begin
         if Pad.Net = Nil then
         begin
             inc(VCount);
-            Rpt.Add(IntToStr(VCount) + ' Pad Name: ' + Pad.PinDescriptor + '  Detail : ' + Pad.Detail);
+            PinDesc := Pad.PinDescriptor;
+            Rpt.Add(PadRight(IntToStr(VCount), 4) + ' ' + PadRight(PinDesc, 20) + '  ' + Pad.Detail);
         end;
         Pad := Iterator.NextPCBObject;
     end;
@@ -327,7 +412,9 @@ procedure DRCViolateNoRoute;
 var
     Scope1List : TObjectList;
     Scope2List : TObjectList;
-    Rule       : IPCB_Rule;     //IPCB_Primitive;
+    RulesList  : TObjectList;  // IPCB_Rule;     //IPCB_Primitive;
+    Rule       : IPCB_Rule;
+    R          : integer;
 
 begin
     Board := PCBServer.GetCurrentPCBBoard;
@@ -337,32 +424,42 @@ begin
     Rpt := TStringList.Create;
     Rpt.Add('Running DRC Violations Check on' + RuleKindToString(RuleToRunRC) );
 
-   // find matching rule
-    Rule := GetMatchingRuleFromBoard(RuleToRunRC);
-// list obj scope 1 & scope2
-    if Rule <> Nil then
-    begin
-        // clear existing violations
+    RulesList := TObjectList.Create;
+//  find matching rule
+    RulesList := GetMatchingRulesFromBoard(RuleToRunRC);
+
+// clear existing violations
+    if RulesList.Count > 0 then
         Client.SendMessage('PCB:ResetAllErrorMarkers', '', 255, Client.CurrentView);
 
+    for R := 0 to (RulesList.Count - 1 ) do
+    begin
+        Rule := RulesList.Items(R);
+        Rpt.Add('rule sub-index ' + IntToStr(R));
+
+//  list obj scope 1 & scope2
         Rule.Scope1Expression;
         Scope1List := GetScopedObjects(Rule, 1);
 
-        if not Rule.IsUnary then       // Rule.Scope2Expression <> '' then
+//        Rule.DRCEnabled;
+//        Rule := Board.FindDominantRuleForObject(Prim, RuleKind);
+
+        if not Rule.IsUnary then       // Rule.Scope2Expression <> '' 
             Scope2List := GetScopedObjects(Rule, 2);
 
         if Rule.IsUnary then
             CheckUnaryViolation(Rule, Scope1List)
         else
-            CheckBinaryScope(Rule, Scope1List, Scope2List);
+            CheckBinaryViolation(Rule, Scope1List, Scope2List);
 //            CheckNetScope(Scope1List, Scope2List);
 
     end;
-
-    DRCReporter(Rpt);
-
-    EndHourGlass;
     Board.ViewManager_FullUpdate;
+
+    RulesList.Destroy;
+    DRCReporter(Rpt);
+    EndHourGlass;
+
     Client.SendMessage('PCB:Zoom', 'Action=Redraw' , 255, Client.CurrentView);
 end;
 
