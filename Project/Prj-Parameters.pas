@@ -10,6 +10,7 @@ Author BL Miller
 Date
 18/09/2019 : v0.1  Initial POC .. seems to work
            : v0.11 Test the Import file has a valid Section before reading it!
+19/09/2019 : v0.12 Code formatting & info text
 }
 
 const
@@ -22,6 +23,7 @@ Var
     IniFile      : TIniFile;
     Flag         : Integer;
     VersionMajor : WideString;
+    ExtParas     : IExternalParameter;
 
 function Version(const dummy : boolean) : TStringList;
 begin
@@ -168,11 +170,11 @@ end;
 
 procedure ImportPrjParas(const Prj : IProject, const FileName : WideString);
 var
-    TuplesList : TStringList;
+    TuplesList    : TStringList;
     ParameterList : TParameterList;   // need to instantiate Parameter.
-    Parameter  : TParameter;
-    OrigValue  : WideString;
-    I          : integer;
+    Parameter     : TParameter;
+    OrigValue     : WideString;
+    I             : integer;
     NewParameterCount : integer;
     ChangeValueCount  : integer;
 
@@ -297,4 +299,14 @@ Each of the Read routines takes three parameters.
  - third is a default value in case the section or value doesn't exist in the INI file.
 Similarly, the Write routines will create the section and/or value if they do not exist.
 
+// ExtParas := IExternalParameter.DM_GetName('OriginalDate');
+{
+The IExternalParameter interface defines the external parameter object.
+Interface Methods
+Method                                  Description
+Function  DM_GetSection : WideString;   Returns the Section string of the external parameter interface.
+Function  DM_GetName : WideString;  Returns the Name string of the external parameter interface.
+Function  DM_GetValue : WideString;     Returns the Value string of the external parameter interface.
+Procedure DM_SetValue(AValue : WideString);     Sets the new value string for this external parameter.
+}
 
