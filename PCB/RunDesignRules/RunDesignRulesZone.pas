@@ -18,14 +18,16 @@ Author: BL Miller
 24/09/2019 : Add modifier keys to change search area size & clear previous violation
 24/09/2019 : FindDominantRuleForObject is completely wrong; missing key net errors.
 25/09/2019 : CheckUnary/BinaryScope is fastest & no false positives or missing errors.
-26/09/2019 : Add ignore set & ignore Confinement Constraint rule as slow & adds little
-
+26/09/2019 1.0 Add an ignore RuleSet & ignore Confinement Constraint as slow & adds little
+10/10/2019 1.1 Refactor Rule test loop to reduce pointless looping of objects
+ 
 tbd: magic speed up
 Confinement Constraint (Rooms) does not raise violations & wastes lots of time (9sec test board)
 
 consider:
 -  not using SpatialIterator (non group)
 -  implementing option Inside or Touching selection rect box using modifier key(s).
+-  adding DRC markers to pad ends of Net violations
 }
 
 const
@@ -370,34 +372,33 @@ begin
                     for I := 0 to (Primitives.Count - 1) do
                     begin
                         Prim1 := Primitives.Items(I);
-                        Violation := nil;
                         if Rule.IsUnary then
-                        if Rule.CheckUnaryScope(Prim1) then      // required to avoid false positives
-//                        if Rule.Scope1Includes(Prim1) then      // no diff & no faster!
-                            Violation := Rule.ActualCheck(Prim1, nil);
-                        if Violation <> nil then
                         begin
-                            Board.AddPCBObject(Violation);
-                            ViolDesc := Violation.Description;
-                            ViolDesc := Copy(ViolDesc, 0, 60);
-                            ViolName := Violation.Name;
-                            Rpt.Add('U  ' + PadRight(Prim1.ObjectIDString, 10) + '            ' + PadRight(ViolName, 30) + ' '
-                                    + ViolDesc + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
-
-                            Prim1.SetState_DRCError(true);
-                            Prim1.GraphicallyInvalidate;
-                            inc(VCount);
-                        end;
-
-                        for J := (I + 1) to (Primitives.Count - 1) do
-                        begin
-                            Prim2 := Primitives.Items(J);
                             Violation := nil;
-                            if (not Rule.IsUnary) then
+                            if Rule.CheckUnaryScope(Prim1) then      // required to avoid false positives
+//                            if Rule.Scope1Includes(Prim1) then      // no diff & no faster!
+                                Violation := Rule.ActualCheck(Prim1, nil);
+                            if Violation <> nil then
                             begin
-                                ValidScope := Rule.CheckBinaryScope(Prim1, Prim2);    // required to avoid false positives
-                                if ValidScope then
-//                            if Rule.Scope2Includes(Prim2) then                      // no diff & no faster!
+                                Board.AddPCBObject(Violation);
+                                ViolDesc := Violation.Description;
+                                ViolDesc := Copy(ViolDesc, 0, 60);
+                                ViolName := Violation.Name;
+                                Rpt.Add('U  ' + PadRight(Prim1.ObjectIDString, 10) + '            ' + PadRight(ViolName, 30) + ' '
+                                        + ViolDesc + '   ' + Rule.Name + ' ' + RuleKindToString(Rule.RuleKind));
+
+                                Prim1.SetState_DRCError(true);
+                                Prim1.GraphicallyInvalidate;
+                                inc(VCount);
+                            end;
+                        end else
+                        begin
+                            for J := (I + 1) to (Primitives.Count - 1) do
+                            begin
+                                Prim2 := Primitives.Items(J);
+                                Violation := nil;
+                                if Rule.CheckBinaryScope(Prim1, Prim2) then    // required to avoid false positives
+//                                if Rule.Scope2Includes(Prim2) then                      // no diff & no faster!
                                     Violation := Rule.ActualCheck(Prim1, Prim2);     // do NOT need to test reverse !
                                 if Violation <> nil then
                                 begin
@@ -414,8 +415,8 @@ begin
                                     Prim2.GraphicallyInvalidate;
                                     inc(VCount);
                                 end;
-                            end;
-                        end;  // J
+                            end; // J
+                        end;  // else unary
                     end;     // I
                 end;  // enabled
             end; // if rulekind
