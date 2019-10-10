@@ -7,15 +7,16 @@
 { Created by:    Petar Perisin                                                    }
 {
  Modified by : B. Miller
+ Date        Ver  Comment
  03/07/2017  : mod to fix layer names output, why was import okay ??
  23/02/2018  : added MechLayer Pairs & colours, still loads old ini files.
  18/08/2019  : Layer colours above eMech16 are all cBlack so ignore.
  28/08/2019  : Try improve import default filepath.
  12/09/2019  : Layer tab display refresh without "flashing" & fix colours for all layers.
  18/09/2019  : Versioncheck & set max mech layers for AD19 & later
- 19/09/2019  : Export: Limit continuous sequential layer export listing to below AllLayerDataMax
-               Import: test the Layer Section Key exists.
- 02/10/2019  : AD19 mechlayer Kind with legacy conversion back to pair
+ 19/09/2019 1.1  Export: Limit continuous sequential layer export listing to below AllLayerDataMax
+                 Import: test the Layer Section Key exists.
+ 02/10/2019 1.2  AD19 mechlayer Kind with legacy conversion back to pair
 
 
 Can already iterate 1 to 64 mech layers in AD17! (see MechLayerNames-test.pas)
