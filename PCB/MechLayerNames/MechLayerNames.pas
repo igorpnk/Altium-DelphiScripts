@@ -17,28 +17,28 @@
  19/09/2019 1.1  Export: Limit continuous sequential layer export listing to below AllLayerDataMax
                  Import: test the Layer Section Key exists.
  02/10/2019 1.2  AD19 mechlayer Kind with legacy conversion back to pair
+ 15/10/2019 1.3  Support all (known) mech layer kinds & component layer pairs.
 
-
-Can already iterate 1 to 64 mech layers in AD17! (see MechLayerNames-test.pas)
- tbd: will it crash?
+Notes: Legacy fallback for AD17/18; drop ML "kind" but retain pairings & names etc.
 
 ..................................................................................}
 const
     NoColour          = 'ncol';
     AD19VersionMajor  = 19;
-    AD17MaxMechLayers = 32;     // scripting API has broken consts from TV6_Layer
+    AD17MaxMechLayers = 32;       // scripting API has broken consts from TV6_Layer
     AD19MaxMechLayers = 1024;
-    AllLayerDataMax   = 16;     // after this mech layer index only report the actual active layers.
-    NoMechLayerKind   = 0;      // enum const does not exist for AD17/18
+    AllLayerDataMax   = 16;       // after this mech layer index only report the actual active layers.
+    NoMechLayerKind   = 0;        // enum const does not exist for AD17/18
+    ctTop             = 'Top';    // text used denote mech layer kinds pairs.
+    ctBottom          = 'Bottom';
 
 var
     Board          : IPCB_Board;
     LayerStack     : IPCB_LayerStack_V7;
     LayerObj_V7    : IPCB_LayerObject_V7;
     MechLayer      : IPCB_MechanicalLayer;
-    MechLayerKind  : TMechanicalKind;
+    MechLayerKind  : TMechanicalLayerKind;
     MLayerKindStr  : WideString;
-    MechLayerKind2 : TMechanicalKind;
     MechPairs      : IPCB_MechanicalLayerPairs;
     VerMajor      : WideString;
     MaxMechLayers : integer;
@@ -58,27 +58,76 @@ begin
     Result.DelimitedText := Client.GetProductVersion;
 end;
 
-function LayerKindToStr(LK : TMechanicalKind) : WideString;
+function LayerKindToStr(LK : TMechanicalLayerKind) : WideString;
 begin
     case LK of
-    NoMechLayerKind : Result := 'Not Set';
-    1               : Result := 'Assembly';
-    2               : Result := 'Courtyard';
+    NoMechLayerKind : Result := 'Not Set';            // single
+    1               : Result := 'Assembly Top';
+    2               : Result := 'Assembly Bottom';
+    3               : Result := 'Assembly Notes';     // single
+    4               : Result := 'Board';
+    5               : Result := 'Coating Top';
+    6               : Result := 'Coating Bottom';
+    7               : Result := 'Component Center Top';
+    8               : Result := 'Component Center Bottom';
+    9               : Result := 'Component Outline Top';
+    10              : Result := 'Component Outline Bottom';
+    11              : Result := 'Courtyard Top';
+    12              : Result := 'Courtyard Bottom';
+    13              : Result := 'Designator Top';
+    14              : Result := 'Designator Bottom';
+    15              : Result := 'Dimensions';         // single
+    16              : Result := 'Dimensions Top';
+    17              : Result := 'Dimensions Bottom';
+    18              : Result := 'Fab Notes';         // single
+    19              : Result := 'Glue Points Top';
+    20              : Result := 'Glue Points Bottom';
+    21              : Result := 'Gold Plating Top';
+    22              : Result := 'Gold Plating Bottom';
+    23              : Result := 'Value Top';
+    24              : Result := 'Value Bottom';
+    25              : Result := 'V Cut';             // single
+    26              : Result := '3D Body Top';
+    27              : Result := '3D Body Bottom';
+    28              : Result := 'Route Tool Path';   // single
+    29              : Result := 'Sheet';             // single
     else              Result := 'Unknown'
     end;
 end;
-function LayerStrToKind(LKS : WideString) : TMechanicalKind;
+
+function LayerStrToKind(LKS : WideString) : TMechanicalLayerKind;
 var
     I : integer;
 begin
     Result := -1;
-    for I := 0 to 10 do
+    for I := 0 to 30 do
     begin
          if LayerKindToStr(I) = LKS then
          begin
              Result := I;
              break;
          end;
+    end;
+end;
+
+function IsMechLayerKindPair(LKS : WideString, var RootKind : WideString) : boolean;
+// RootKind : basename of layer kind (Assembly, Coating, Courtyard etc)
+var
+    WPos : integer;
+begin
+    Result := false;
+    RootKind := LKS;
+    WPos := AnsiPos(ctTop,LKS);
+    if WPos > 2 then
+    begin
+        Result := true;
+        SetLength(RootKind, WPos - 2);
+    end;
+    WPos := AnsiPos(ctBottom,LKS);
+    if WPos > 2 then
+    begin
+        Result := true;
+        SetLength(RootKind, WPos - 2);
     end;
 end;
 
@@ -138,15 +187,12 @@ begin
             IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'SLM',     MechLayer.DisplayInSingleLayerMode);
             IniFile.WriteString('MechLayer' + IntToStr(i), 'Color',   ColorToString(Board.LayerColor[ML1]) );
 
-// if layer has valid "Kind" do not need (our) explicit pairing.
-            if (MechLayerKind <= NoMechLayerKind) then
+// if layer has valid "Kind" STILL need (our) explicit pairing to be set.
+            for j := 1 to MaxMechLayers do
             begin
-                for j := 1 to MaxMechLayers do
-                begin
-                    ML2 := LayerUtils.MechanicalLayer(j);
-                    if MechPairs.PairDefined(ML1, ML2) then
-                        IniFile.WriteString('MechLayer' + IntToStr(i), 'Pair', Board.LayerName(ML2) );
-                end;
+                ML2 := LayerUtils.MechanicalLayer(j);
+                if MechPairs.PairDefined(ML1, ML2) then
+                    IniFile.WriteString('MechLayer' + IntToStr(i), 'Pair', Board.LayerName(ML2) );
             end;
         end;
     end;
@@ -157,12 +203,15 @@ end;
 
 Procedure ImportMechLayerInfo;
 var
-    PCBSysOpts : IPCB_SystemOptions;
-    OpenDialog : TOpenDialog;
-    MechLayer2 : IPCB_MechanicalLayer;
-    MPairLayer : String;
-    LColour    : TColor;
-    LKind      : TLayerKind;
+    PCBSysOpts     : IPCB_SystemOptions;
+    OpenDialog     : TOpenDialog;
+    MechLayer2     : IPCB_MechanicalLayer;
+    MPairLayer     : WideString;
+    MechLayerKind2 : TMechanicalLayerKind;
+    MLayerKindStr2 : WideString;
+    MLKindRoot     : WideString;
+    MLKindRoot2    : WideString;
+    LColour        : TColor;
 
 begin
     Board := PCBServer.GetCurrentPCBBoard;
@@ -219,6 +268,9 @@ begin
                 PCBSysOpts.LayerColors(ML1) := StringToColor( LColour);
 
             MechLayerKind := LayerStrToKind(MLayerKindStr);
+//    new "kind" pairs are treated individually by kind but are still a Pair
+            if not LegacyMLS then
+                 MechLayer.Kind  := MechLayerKind;
 
 //    remove existing mechpairs & add new ones.
 //    potentially new layer names in this file are of mech pair; only check parsed ones.
@@ -226,38 +278,27 @@ begin
             begin
                 ML2            := LayerUtils.MechanicalLayer(j);
                 MechLayer2     := LayerStack.LayerObject_V7(ML2);
-                MechLayerKind2 := LayerStrToKind( IniFile.ReadString('MechLayer' + IntToStr(j), 'Kind',  IntToStr(NoMechLayerKind) ) );
+                MLayerKindStr2 := IniFile.ReadString('MechLayer' + IntToStr(j), 'Kind',  IntToStr(NoMechLayerKind) );
+                MechLayerKind2 := LayerStrToKind(MLayerKindStr2);
 
 //        remove pair including backwards ones !
                 if MechPairs.PairDefined(ML2, ML1) then
                     MechPairs.RemovePair(ML2, ML1);
                 if MechPairs.PairDefined(ML1, ML2) then
                     MechPairs.RemovePair(ML1, ML2);
-                if not LegacyMLS then
-                begin
-                    MechLayer.Kind  := NoMechLayerKind;
-                    MechLayer2.Kind := NoMechLayerKind;
-                end;
 
-//        add pairs back if "Pair" but not if valid "Kind"
-                if (MechLayerKind <= NoMechLayerKind) then
+                if (MPairLayer = MechLayer2.Name) and not MechPairs.PairDefined(ML2, ML1) then
+                    MechPairs.AddPair(ML2, ML1);
+
+//  just in case a "Kind" pair does not have "Pair" set..
+                if LegacyMLS and (not MechPairs.PairDefined(ML2, ML1) ) then
                 begin
-                    if (MPairLayer = MechLayer2.Name) and not MechPairs.PairDefined(ML2, ML1) then
-                        MechPairs.AddPair(ML2, ML1);
-                end
-//        legacy convert Kind to pairs if Kind is valid
-                else
-                begin
-                    if LegacyMLS then
-                    begin
-                        if (MechLayerKind = MechLayerKind2) and not MechPairs.PairDefined(ML2, ML1) then
+                    MLKindRoot  := '';       // root basename of layer kind (Assembly, Coating, Courtyard etc)
+                    MLKindRoot2 := '';
+                    if IsMechLayerKindPair(MLayerKindStr,  MLKindRoot) and
+                       IsMechLayerKindPair(MLayerKindStr2, MLKindRoot2) then
+                        if (MLKindRoot = MLKindRoot2) and (MLKindRoot <> '') then
                             MechPairs.AddPair(ML2, ML1);
-                    end
-                    else
-                    begin
-                        MechLayer.Kind  := MechLayerKind;
-                        MechLayer2.Kind := MechLayerKind;
-                    end;
                 end;
             end;
 
