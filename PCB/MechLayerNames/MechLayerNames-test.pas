@@ -20,6 +20,7 @@
  28/09/2019  : Added colour & display status to layerclass outputs
  30/09/2019  : Resolved the V7_LayerID numbers & fixed colour error in LayerClass
  02/10/2019  : Added mechlayer kind for AD19+
+ 16/10/2019  : Added UsedByPrims; IPCB_MechanicalLayerPairs.LayerUsed() works with correct index
 
          tbd :  Use Layer Classes test in AD17 & AD19
 
@@ -39,6 +40,7 @@ var
     LayerObj      : IPCB_LayerObject;
     LayerClass    : TLayerClassID;
     MechLayer     : IPCB_MechanicalLayer;
+    MechLayer2    : IPCB_MechanicalLayer;
     MechLayerKind : TMechanicalKind;
     MLayerKindStr : WideString;
     MechPairs     : IPCB_MechanicalLayerPairs;
@@ -124,7 +126,7 @@ begin
     begin
         TempS.Add('');
         TempS.Add('eLayerClass ' + IntToStr(LayerClass) + '  ' + LayerClassName(LayerClass));
-        TempS.Add('lc.i : |   name           short name         IsDisplayed?   Colour');
+        TempS.Add('lc.i : |   name           short name         IsDisplayed?   Colour   V7_LayerID');
         i := 1;
         LayerObj := LayerStack.First(LayerClass);
 
@@ -150,7 +152,8 @@ begin
             LColour := ColorToString(PCBSysOpts.LayerColors(Layer));
 
             TempS.Add(Padright(IntToStr(LayerClass) + '.' + IntToStr(i),4) + ' | ' + Padright(LayerPos,3) + ' ' + PadRight(LayerObj.Name, 15)
-                      + PadRight(LName, 20) + '  ' + PadRight(BoolToStr(IsDisplayed,true), 6) + '  ' + PadRight(LColour, 15) + ' ' +PadLeft(IntToStr(Layer),9));
+                      + PadRight(LName, 20) + '  ' + PadRight(BoolToStr(IsDisplayed,true), 6) + '  ' + PadRight(LColour, 15)
+                      + ' ' +PadLeft(IntToStr(Layer), 9) + '  ' + BoolToStr(LayerObj.UsedByPrims, true) );
 
             LayerObj := LayerStack.Next(Layerclass, LayerObj);
             Inc(i);
@@ -172,7 +175,7 @@ begin
 // Old? Methods for Mechanical Layers.
 
     LayerStack := Board.LayerStack_V7;
-    TempS.Add('Calc LayerID    boardlayername      layername       kind     V7_LayerID');
+    TempS.Add('Calc LayerID   boardlayername       layername            kind  V7_LayerID  UsedByPrims ');
     for i := 1 to 64 do
     begin
         ML1 := LayerUtils.MechanicalLayer(i);
@@ -196,18 +199,13 @@ begin
       //  ('MechLayer' + IntToStr(i), 'Color',   ColorToString(Board.LayerColor[ML1]) );
 
         end;
-        TempS.Add(PadRight(IntToStr(i),3) + ' ' + PadRight(IntToStr(ML1),10) + ' ' + PadRight(Board.LayerName(ML1),20) 
-                           + ' ' + PadRight(LayerName,20) + ' ' + IntToStr(MechLayerKind) + ' ' + PadLeft(IntToStr(Layer), 8) );
-        // LayerObj.UsedByPrims;
+
+        TempS.Add(PadRight(IntToStr(i), 3) + ' ' + PadRight(IntToStr(ML1), 10) + ' ' + PadRight(Board.LayerName(ML1), 20)
+                  + ' ' + PadRight(LayerName, 20) + ' ' + PadRight(IntToStr(MechLayerKind), 3) + ' ' + PadLeft(IntToStr(Layer), 8)
+                  + '   ' + BoolToStr(LayerObj.UsedByPrims, true) );
     end;
 
 
-{ LayerPair[I : Integer] property defines indexed layer pairs and returns a TMechanicalLayerPair record of two PCB layers.
-  TMechanicalLayerPair = Record
-    Layer1 : TLayer;
-    Layer2 : TLayer;
-  End;
-}
     TempS.Add('');
     TempS.Add('');
     TempS.Add(' ----- MechLayerPairs Legacy 1 to 32/64 ?? -----');
@@ -223,12 +221,14 @@ begin
         MechPair := MechPairs.LayerPair[j];
         if MechPair <> Nil then
         begin
+
  //  broken because no wrapper function to handle TMechanicalLayerPair record.
-{
-TMechanicalLayerPair = Record
-Layer1 : TLayer;
-Layer2 : TLayer;
-End;
+{ LayerPair[I : Integer] property defines indexed layer pairs and returns a TMechanicalLayerPair record of two PCB layers.
+
+  TMechanicalLayerPair = Record
+    Layer1 : TLayer;
+    Layer2 : TLayer;
+  End;
 }
 //            Layer := MechPair ;   //  .Layer1;              // does NOT work
 //            MechPair(Layer1);
@@ -250,20 +250,25 @@ End;
 //  for Layer := MinMechanicalLayer to MaxMechanicalLayer do
     begin
         ML1 := LayerUtils.MechanicalLayer(i);
-        Layer := i + MinMechanicalLayer - 1;
-        MechLayer := LayerStack.LayerObject_V7[ML1];
-
+        Layer := i + MinMechanicalLayer - 1;               // tracks ML1 until eMech24 !
+        MechLayer := LayerStack.LayerObject_V7(ML1);
 //        MechLayer := LayerStack.LayerObject[Layer];      // this method does not work above eMech24 !!
 
-//        if MechPairs.LayerUsed(MechLayer) then         // always false (Layer) ! ; pass it (MechLayer) & will crash!
-//        begin
+        MechLayer.V7_LayerID.ID ;
 
+        if MechPairs.LayerUsed(ML1) then          // method works to eMech1 to eMech32 AD17
+        begin
             for j := (i + 1) to 64 do
             begin
-                ML2 := LayerUtils.MechanicalLayer(j);
+                ML2        := LayerUtils.MechanicalLayer(j);
+                MechLayer2 := LayerStack.LayerObject_V7(ML2);
+                MechLayer2.V7_LayerID.ID ;
+                MechPairs.LayerUsed(ML2);
+
                 if MechPairs.PairDefined(ML1, ML2) then
                     TempS.Add(PadRight(IntToStr(i),3) + '-' + PadLeft(IntToStr(j),3) + '                 ' + Board.LayerName(ML1) + ' - ' + Board.LayerName(ML2) );
             end;
+        end;
     end;
 
     WS := GetWorkSpace;
