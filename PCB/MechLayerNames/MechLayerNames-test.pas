@@ -9,7 +9,7 @@
 
   Modified by: B Miller
 
- v 0.22 
+ v 0.51
  03/07/2017  : mod to fix layer names output, why was import okay ??
  23/02/2018  : added MechLayer Pairs & colours
  27/02/2018  : MechPair detect logic; only remove existing if any MPs detected in file
@@ -21,6 +21,7 @@
  30/09/2019  : Resolved the V7_LayerID numbers & fixed colour error in LayerClass
  02/10/2019  : Added mechlayer kind for AD19+
  16/10/2019  : Added UsedByPrims; IPCB_MechanicalLayerPairs.LayerUsed() works with correct index
+ 31/10/2019 0.51 : Added thickness for Cu & dielectric layer properties
 
          tbd :  Use Layer Classes test in AD17 & AD19
 
@@ -68,6 +69,18 @@ begin
     end;
 end;
 
+function DielectricToStr(DL : TDielectric) : WideString;
+begin
+    Result := '';
+  // Convert dielectric type to string. Detected case could also be 0,1,2,3.
+    case DL of
+        eNoDielectric    : Result := 'None'; 
+        eCore            : Result := 'Core';
+        ePrePreg         : Result := 'PrePreg';
+        eSurfaceMaterial : Result := 'Surface Material';
+    end;
+end;
+
 function Version(const dummy : boolean) : TStringList;
 begin
     Result := TStringList.Create;
@@ -81,6 +94,8 @@ var
    WS          : IWorkspace;
    // LayStack_V7 : IPCB_LayerStack_V7;
    // LayObj_V7   : IPCB_LayerObject_V7;
+   Dielectric  : IPCB_DielectricObject;
+   Copper      : IPCB_ElectricalLayer;
    i, j        : Integer;
    SaveDialog  : TSaveDialog;
    Flag        : Integer;
@@ -90,6 +105,10 @@ var
    temp        : integer;
    LayerName   : WideString;
    LayerPos    : WideString;
+   Thickness   : WideString;
+   DieType     : WideString;
+   DieMatl     : WideString;
+   DieConst    : WideString;
    LColour     : WideString;
    LName       : WideString;
    IsDisplayed : boolean;
@@ -126,7 +145,13 @@ begin
     begin
         TempS.Add('');
         TempS.Add('eLayerClass ' + IntToStr(LayerClass) + '  ' + LayerClassName(LayerClass));
-        TempS.Add('lc.i : |   name           short name         IsDisplayed?   Colour   V7_LayerID');
+        if (LayerClass = eLayerClass_Dielectric) or (LayerClass = eLayerClass_SolderMask) then
+            TempS.Add('lc.i : |   name           short name       IsDisplayed? Colour     V7_LayerID Used? Dielectric : Type    Matl    Thickness  Const ')
+        else if (LayerClass = eLayerClass_Electrical) or (LayerClass = eLayerClass_Signal) then
+            TempS.Add('lc.i : |   name           short name       IsDisplayed? Colour     V7_LayerID Used?                              Thickness (Cu)')
+        else
+            TempS.Add('lc.i : |   name           short name       IsDisplayed? Colour     V7_LayerID Used? ');
+
         i := 1;
         LayerObj := LayerStack.First(LayerClass);
 
@@ -142,9 +167,28 @@ begin
 
             LayerObj.IsInLayerStack;       // check always true.
 
-            LayerPos :='';
-            if LayerClass = eLayerClass_Electrical then
-               LayerPos := IntToStr(Board.LayerPositionInSet(AllLayers, LayerObj));       // think this only applies to eLayerClass_Electrical
+            LayerPos  := '';
+            Thickness := '';
+            DieType   := '';
+            DieMatl   := '';
+            DieConst  := '';     // as string for simplicity of reporting
+
+            if (LayerClass = eLayerClass_Electrical) or (LayerClass = eLayerClass_Signal) then
+            begin
+               Copper    := LayerObj;
+               Thickness := CoordUnitToString(Copper.CopperThickness, eMetric);
+               LayerPos  := IntToStr(Board.LayerPositionInSet(AllLayers, Copper));       // think this only applies to eLayerClass_Electrical
+            end;
+
+            if (LayerClass = eLayerClass_Dielectric) or (LayerClass = eLayerClass_SolderMask) then
+            begin
+                Dielectric := LayerObj;  // .Dielectric Tv6
+                DieType   := DielectricToStr(Dielectric.DielectricType);              // TDielectricType
+                if DieType = 'Surface Material' then DieType := 'Surface';
+                Thickness := CoordUnitToString(Dielectric.DielectricHeight, eMetric);
+                DieMatl   := Dielectric.DielectricMaterial;
+                DieConst  := FloatToStr(Dielectric.DielectricConstant);
+            end;
 
             LName := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Short) ; // TLayernameDisplayMode: eLayerNameDisplay_Long/Short/Medium
             IsDisplayed := Board.LayerIsDisplayed(Layer);
@@ -152,8 +196,9 @@ begin
             LColour := ColorToString(PCBSysOpts.LayerColors(Layer));
 
             TempS.Add(Padright(IntToStr(LayerClass) + '.' + IntToStr(i),4) + ' | ' + Padright(LayerPos,3) + ' ' + PadRight(LayerObj.Name, 15)
-                      + PadRight(LName, 20) + '  ' + PadRight(BoolToStr(IsDisplayed,true), 6) + '  ' + PadRight(LColour, 15)
-                      + ' ' +PadLeft(IntToStr(Layer), 9) + '  ' + BoolToStr(LayerObj.UsedByPrims, true) );
+                      + PadRight(LName, 20) + '  ' + PadRight(BoolToStr(IsDisplayed,true), 6) + '  ' + PadRight(LColour, 12)
+                      + PadLeft(IntToStr(Layer), 9) + ' ' + PadRight(BoolToStr(LayerObj.UsedByPrims, true), 6)
+                      + PadRight(DieType, 15) + PadRight(DieMatl, 15) + PadRight(Thickness, 10) + DieConst );
 
             LayerObj := LayerStack.Next(Layerclass, LayerObj);
             Inc(i);
