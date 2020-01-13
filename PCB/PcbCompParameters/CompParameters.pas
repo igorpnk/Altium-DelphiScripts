@@ -3,7 +3,8 @@
          PCB Doc focused component parameter dumper
 
 B. Miller
-13/01/2020  v0.1  initial POC
+13/01/2020  v0.01   initial POC
+14/01/2020  v0.11   cruft removal
 
                                          
 ..............................................................................}
@@ -19,13 +20,7 @@ Var
     FilePath   : WideString;
     FileName   : WideString;
 
-Function BooleanToString (Value : LongBool) : String;
-Begin
-    Result := 'True';
 
-    If Value = True Then Result := 'True'
-                    Else Result := 'False';
-End;
 {..............................................................................}
 
 Procedure ReportCompParameters;
@@ -38,10 +33,6 @@ var
     PrimDoc        : IDocument;
 
     Comp           : IComponent;
-    TargetComp     : iComponent;
-    CompImpl       : IComponentImplementation;
-    TargetImpl     : IComponentImplementation;
-    CurrentSch     : ISch_Document;
     I, J, K, L     : Integer;
 
 Begin
@@ -90,6 +81,7 @@ Begin
 //    For I := 0 to (Prj.DM_PhysicalDocumentCount - 1) Do
 //    Begin
 //        Doc := Prj.DM_PhysicalDocuments(I);
+
     If Doc.DM_DocumentKind = cDocKind_Pcb Then
     begin
 //        without this the DM_ComponentCount = 0 !! 
@@ -107,7 +99,6 @@ Begin
                 PrjReport.Add(' Lib Reference    : ' + Comp.DM_LibraryReference);
                 PrjReport.Add(' Comp FootPrint   : ' + Comp.DM_FootPrint);
                 PrjReport.Add(' Current FP Model : ' + Comp.DM_CurrentImplementation(cDocKind_PcbLib).DM_ModelName + '  ModelType :' + Comp.DM_CurrentImplementation(cDocKind_PcbLib).DM_ModelType);
-
 
 
 //   report component level parameters
@@ -153,15 +144,4 @@ Begin
         Client.ShowDocument(ReportDocument);
 
 End;
-
-// see Project/OutJob-Script/SimpleOJScript.pas.
-
-
-
-{..............................................................................}
-// Function DM_UnmatchedSourceComponent(Index : Integer) : IComponent;  Returns the indexed unmatched source component, that is, a target component could not be found to map to this source component. Use the DM_UnmatchedSourceComponentCount function.
-// Function DM_UnmatchedTargetComponent(Index : Integer) : IComponent;  Returns the indexed unmatched target component, that is, a source component could not be found to map to the target component. Use the DM_UnmatchedTargetComponentCount function.
-// Function DM_MatchedComponentCount: Integer;  Returns the number of matched components.
-// Function DM_MatchedSourceComponent  (Index : Integer) : IComponent;  Returns the indexed matched source component (that has been matched with a target component). Use the DM_MatchedSourceComponentCount function.
-// Function DM_MatchedTargetComponent  (Index : Integer) : IComponent;  Returns the indexed matched source component (that has been matched with a target component). Use the DM_MatchedTargetComponentCount function.
 
