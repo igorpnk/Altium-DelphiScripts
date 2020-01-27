@@ -7,8 +7,9 @@
 
 
  Author B. Miller
- 26/01/2020  v0.1 POC
- 27/01/2020  V0.2 Implement board thickness adjustment to standoff for reverse side projections.
+ 26/01/2020  v0.1  POC
+ 27/01/2020  v0.2  Implement board thickness adjustment to standoff for reverse side projections.
+             v0.21 Report sum the top & bottom heights & PCB thickness.
 
 }
 var
@@ -237,8 +238,9 @@ Begin
     Rpt.Insert(0, '3D Model Information for ' + ExtractFileName(Board.FileName) + ' document.');
     Rpt.Insert(1, '----------------------------------------------------------');
     Rpt.Insert(2, 'Board Thickness  ' + CoordUnitToString(BrdThickness, eMetric) );
-    Rpt.Insert(3, 'Max (top side projection ) 3D Model Height ' + MaxTHFP.Pattern + '  ' + CoordUnitToString(MaxTHeight, cUnitMM ));
-    Rpt.Insert(4, 'Max (bottom side projn.  ) 3D Model Height ' + MaxBHFP.Pattern + '  ' + CoordUnitToString(MaxBHeight, cUnitMM ));
+    Rpt.Insert(3, 'Max (top side projection ) 3D Model Height ' + MaxTHFP.Name.Text + '  ' + MaxTHFP.Pattern + '  ' + CoordUnitToString(MaxTHeight, cUnitMM ));
+    Rpt.Insert(4, 'Max (bottom side projn.  ) 3D Model Height ' + MaxBHFP.Name.Text + '  ' + MaxBHFP.Pattern + '  ' + CoordUnitToString(MaxBHeight, cUnitMM ));
+    Rpt.Insert(5, 'Total Overall Height top to bottom ' + CoordUnitToString( (MaxBHeight + MaxTHeight + BrdThickness), cUnitMM ));
 
     // Display the report
     FileName := ExtractFilePath(Board.FileName) + ChangefileExt(ExtractFileName(Board.FileName),'') + '-3DModelReport.txt';
