@@ -10,20 +10,26 @@
  26/01/2020  v0.1  POC
  27/01/2020  v0.2  Implement board thickness adjustment to standoff for reverse side projections.
              v0.21 Report sum the top & bottom heights & PCB thickness.
+ 27/01/2020  v0.22 Impl. export generic models to composite name from pattern & model.
 
 }
+const
+    cModel3DGeneric  = 1;
+    cExport3DMFolder = 'Exported3DModels\';
+
 var
     Rpt       : TStringList;
     FileName  : WideString;
     Document  : IDocument;
+    Board     : IPCB_Board;
 
 function ModelTypeToStr (ModType : T3DModelType) : WideString;
 begin
     Case ModType of
-        0 : Result := 'Extruded';
-        1 : Result := 'Generic 3D';
-        2 : Result := 'Cylinder';
-        3 : Result := 'Sphere';
+        0               : Result := 'Extruded';
+        cModel3DGeneric : Result := 'Generic 3D';
+        2               : Result := 'Cylinder';
+        3               : Result := 'Sphere';
     else
         Result := 'unknown';
     end;
@@ -78,7 +84,6 @@ end;
 
 Procedure GetCompModelHeight;
 Var
-    Board            : IPCB_Board;
 //    LayerStack       : IPCB_LayerStack;
     FIterator        : IPCB_Iterator;
     GIterator        : IPCB_GroupIterator;
@@ -93,7 +98,7 @@ Var
     FPHeight         : TCoord;
 
     CompBody         : IPCB_ComponentBody;
-    MyModel          : IPCB_Model;
+    CompModel          : IPCB_Model;
     MaxTHeight       : TCoord;
     MaxBHeight       : TCoord;      // backside max height
     ModDefName       : TPCBString;  // WideString
@@ -104,17 +109,18 @@ Var
     ModLayer         : TLayer;
     ModType          : T3DModelType;
 
-    Count3DB         : Integer;
+    Count3DBody      : Integer;
 
     ButtonSelected   : Integer;
     AView            : IServerDocumentView;
     AServerDocument  : IServerDocument;
 
 Begin
-    MaxTHeight := 0;
-    MaxBHeight := 0;
-    MaxTHFP    := nil;
-    MaxBHFP    := nil;
+    Count3DBody := 0;
+    MaxTHeight  := 0;
+    MaxBHeight  := 0;
+    MaxTHFP     := nil;
+    MaxBHFP     := nil;
 
     Board := PCBServer.GetCurrentPCBBoard;
     If Board = Nil Then
@@ -155,19 +161,19 @@ Begin
             CompBody := GIterator.FirstPCBObject;
             While CompBody <> Nil Do
             Begin
-                MyModel := CompBody.Model;
+                CompModel := CompBody.Model;
                 ModDefName  := '';
                 ModFileName := '';
 
-                if MyModel <> nil then
+                if CompModel <> nil then
                 begin
-                    ModDefName  := MyModel.Name;    //  DefaultPCB3DModel;
-                    ModFileName := MyModel.FileName;
-                    MyModel.Rotation;
-                    MyModel.ModelType;
-                    // MyModel.UniqueName;
-                    // MyModel.Descriptor    .Detail;
-                    // MyModel.SaveModelToFile(path);
+                    ModDefName  := CompModel.Name;    //  DefaultPCB3DModel;
+                    ModFileName := CompModel.FileName;
+                    CompModel.Rotation;
+                    CompModel.ModelType;
+                    // CompModel.UniqueName;
+                    // CompModel.Descriptor    .Detail;
+                    // CompBody.SaveModelToFile(path);
                 end;
 
                 ModProject  := CompBody.BodyProjection;
@@ -205,15 +211,14 @@ Begin
                 end;
 
  // LayerUtils.AsString(CurrentLayer) + '  ' + Layer2String() +  Board.LayerName(CurrentLayer) + '  ' + LayerObject.Name ;
-
                 Rpt.Add(' ' + Board.LayerName(ModLayer) + '  ' + PadRight(ModelTypeToStr(ModType), 10) + '  ' + BoardSideToStr(ModProject) +
                         '  ' + CoordUnitToString(ModHeight, cUnitMM ) + '  ' + CoordUnitToString(ModStandOff, cUnitMM) + '       ' + ModFileName);
 
                 If ModHeight <> 0 Then
                     If ModHeight > Footprint.Height Then
                     Begin
-//                         Footprint.Height := MyModel.OverallHeight;
-                         Inc(Count3DB);
+//                         Footprint.Height := CompModel.OverallHeight;
+                         Inc(Count3DBody);
                     End;
 
                 CompBody := GIterator.NextPCBObject;
@@ -225,13 +230,7 @@ Begin
 
     finally
 
-        if Count3DB>0 then
-        begin
-            // warn FP height is less than 3D model height n times ??
-        end;
-
         ShowMessage('Max 3D Model Height Up ' + CoordUnitToString(MaxTHeight, cUnitMM ) + '  down ' + CoordUnitToString(MaxBHeight, cUnitMM ));   // FloatToStrF(MaxHeight, ffNumber, 3, 6));
-
         Board.BoardIterator_Destroy(FIterator);
     end;
 
@@ -256,5 +255,99 @@ Begin
     end;
 
 End;
+
+Procedure ExportCompModels;
+var
+    FIterator        : IPCB_Iterator;
+    GIterator        : IPCB_GroupIterator;
+
+    Footprint        : IPCB_Component;
+    FPPattern        : TPCBString;
+    FPName           : IPCB_Text;
+    CompBody         : IPCB_ComponentBody;
+    CompModel        : IPCB_Model;
+    ModType          : T3DModelType;
+    FilePath         : WideString;
+    ModFileName      : WideString;
+    FileSaved        : boolean;
+
+begin
+    Board := PCBServer.GetCurrentPCBBoard;
+    If Board = Nil Then Exit;
+    
+    Rpt := TStringList.Create;
+    Rpt.Add('');
+    Rpt.Add('Export Generic 3D Models:');
+
+    FIterator := Board.BoardIterator_Create;
+    FIterator.AddFilter_ObjectSet(MkSet(eComponentObject));
+    FIterator.AddFilter_LayerSet(AllLayers);
+    FIterator.AddFilter_Method(eProcessAll);   // TIterationMethod { eProcessAll, eProcessFree, eProcessComponents }
+
+    try
+        Footprint := FIterator.FirstPCBObject;
+
+        while Footprint <> Nil Do
+        begin
+//            Rpt.Add('');
+            FPName    := Footprint.Name.Text;
+            FPPattern := Footprint.Pattern;
+
+            GIterator := Footprint.GroupIterator_Create;
+            GIterator.Addfilter_ObjectSet(MkSet(eComponentBodyObject));
+
+            CompBody := GIterator.FirstPCBObject;
+            While CompBody <> Nil Do
+            Begin
+                CompModel := CompBody.Model;
+
+                FilePath := ExtractFilePath(Board.FileName) + cExport3DMFolder;
+                if not DirectoryExists(FilePath) then DirectoryCreate(FilePath);
+                FileSaved := false;
+
+                if CompModel <> nil then
+                begin
+                    ModFileName := CompModel.FileName;
+                    ModFileName := FPPattern + '_' + ModFileName;
+
+                    CompModel.Rotation;
+                    ModType     := CompModel.ModelType;
+               //   ModType     := CompBody.GetState_ModelType;  // T3DModelType
+                    if ModType = cModel3DGeneric then
+                    begin
+                        FileSaved := CompBody.SaveModelToFile(FilePath + ModFileName);
+                        Rpt.Add('FP ' + FPName + '  ' + FPPattern + '  exported to  ' + ModFileName);
+                    end;
+                end;
+
+                CompBody := GIterator.NextPCBObject;
+            End;
+
+            Footprint.GroupIterator_Destroy(GIterator);
+            Footprint := FIterator.NextPCBObject;
+        End;
+
+    finally
+
+        Board.BoardIterator_Destroy(FIterator);
+    end;
+ 
+    Rpt.Insert(0, 'Export 3D Models  for ' + ExtractFileName(Board.FileName) );
+    Rpt.Insert(1, '----------------------------------------------------------');
+
+    // Display the report
+    FileName := ExtractFilePath(Board.FileName) + cExport3DMFolder + ChangefileExt(ExtractFileName(Board.FileName),'') + '-3DModelExportReport.txt';
+    Rpt.SaveToFile(Filename);
+    Rpt.Free;
+
+    Document  := Client.OpenDocument('Text', FileName);
+    If Document <> Nil Then
+    begin
+        Client.ShowDocument(Document);
+        if (Document.GetIsShown <> 0 ) then
+            Document.DoFileLoad;
+    end;
+end;
+
 { eof }
 
