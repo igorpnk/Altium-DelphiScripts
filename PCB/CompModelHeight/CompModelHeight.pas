@@ -11,6 +11,7 @@
  27/01/2020  v0.2  Implement board thickness adjustment to standoff for reverse side projections.
              v0.21 Report sum the top & bottom heights & PCB thickness.
  27/01/2020  v0.22 Impl. export generic models to composite name from pattern & model.
+ 28/01/2020  v0.23 Check export folder exists before writing report file to it.
 
 }
 const
@@ -275,6 +276,8 @@ begin
     Board := PCBServer.GetCurrentPCBBoard;
     If Board = Nil Then Exit;
     
+    FilePath := ExtractFilePath(Board.FileName) + cExport3DMFolder;
+
     Rpt := TStringList.Create;
     Rpt.Add('');
     Rpt.Add('Export Generic 3D Models:');
@@ -301,7 +304,6 @@ begin
             Begin
                 CompModel := CompBody.Model;
 
-                FilePath := ExtractFilePath(Board.FileName) + cExport3DMFolder;
                 if not DirectoryExists(FilePath) then DirectoryCreate(FilePath);
                 FileSaved := false;
 
@@ -336,7 +338,11 @@ begin
     Rpt.Insert(1, '----------------------------------------------------------');
 
     // Display the report
-    FileName := ExtractFilePath(Board.FileName) + cExport3DMFolder + ChangefileExt(ExtractFileName(Board.FileName),'') + '-3DModelExportReport.txt';
+    if DirectoryExists(FilePath) then
+        FileName := FilePath +                        ChangefileExt(ExtractFileName(Board.FileName),'') + '-3DModelExportReport.txt'
+    else
+        FileName := ExtractFilePath(Board.FileName) + ChangefileExt(ExtractFileName(Board.FileName),'') + '-3DModelExportReport.txt';
+
     Rpt.SaveToFile(Filename);
     Rpt.Free;
 
