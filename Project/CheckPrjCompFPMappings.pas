@@ -5,12 +5,15 @@
          Footprints should be in same IntLib as symbols.
 
          This code does check (untested!) footprint source matches FPcomponent source !!
-                                                                              
+         System like parameters in SchDoc/Prj component are ignored.
+         Extra parameters in PCB FP component are ignored
+
 B. Miller
 21/08/2018  v0.1  intial
-15/12/2018  v0.2  added message panel stuff 
+15/12/2018  v0.2  added message panel stuff
+07/02/2020  v0.3  report cleanup: report differences of model names, libraries & parameters
 
-                                         
+
 ..............................................................................}
 
 Const
@@ -40,7 +43,6 @@ Var
     Prj        : IBoardProject;
     PrjMapping : IComponentMappings;
     Board      : IPCB_Board;
-    Param      : IParameter;
     PrjReport  : TStringList;
     PCBList    : TStringList;
     FilePath   : WideString;
@@ -55,12 +57,65 @@ Begin
 End;
 {..............................................................................}
 
+{ some of SchDoc/Prj component paramters are not same in PCb footprint comp }
+function CheckIgnoreParameter(PName : WideString) : boolean;
+begin
+    Result := false;
+    PName := Trim(PName);
+    case PName of
+    'Component Kind'    :
+        Result := true;
+    'Component Type'    :
+        Result := true;
+    'Description'       :
+        Result := true;
+    'Designator'        :
+        Result := true;
+    'Footprint'         :
+        Result := true;
+    'Library Name'      :
+        Result := true;
+    'Library Reference' :
+        Result := true;
+    'Pin Count'         :
+        Result := true;
+    'PCB3D'             :
+        Result := true;
+    'Ibis Model'        :
+        Result := true;
+    'Signal Integrity'  :
+        Result := true;
+    'Simulation'        :
+        Result := true;
+    end;
+end;
+
+function FindParameterValue(Comp : IComponent, PName : WideString) : WideString;
+var
+    I       : integer;
+    Param   : IParameter;
+    bFound  : boolean;
+
+begin
+    Result := '';
+    I := 0;
+    bFound := false;
+
+    while (not bFound) and (I < (Comp.DM_ParameterCount - 1)) do
+    begin
+        Param := Comp.DM_Parameters(I);
+        if SameString(Param.DM_Name, PName, False) then
+        begin
+            bFound := true;
+            Result := Param.DM_Value;
+        end;
+        Inc(I);
+    end;
+end;
+
+
 Procedure ReportCompMappings;
 var
-    PCBComp        : IPCB_Component;
-    Iterator       : IPCB_BoardIterator;
-    ParamReport    : TStringList;
-
     ReportDocument : IServerDocument;
     PrimDoc        : IDocument;
 
@@ -68,13 +123,16 @@ var
     TargetComp     : iComponent;
     CompImpl       : IComponentImplementation;
     TargetImpl     : IComponentImplementation;
+    Param      : IParameter;
+    FPParam    : IParameter;
     CurrentSch     : ISch_Document;
-    I, J, K, L     : Integer;
-    TotSLinkCount  : Integer;            // Total missing symbol link count
-    TotFLinkCount  : Integer;            // Total missing footprint model link count
-    SLinkCount     : Integer;
+    I, J, K, L, M  : Integer;
+    TotLLinkCount  : Integer;            // Total mismatched library link count
+    TotFLinkCount  : Integer;            // Total mismatched footprint model link count
+    LLinkCount     : Integer;
     FLinkCount     : Integer;
     SMess          : WideString;
+    bFound         : boolean;
 
 Begin
     WS  := GetWorkspace;
@@ -104,9 +162,11 @@ Begin
     MMPanel := WS.DM_MessagesManager;
     MMPanel.ClearMessages;
     WS.DM_ShowMessageView;
+
     MSource := 'CheckPrjCompFPMappings (CPCFM) script';
     MMessage := 'Check-Project-Component-FootPrint-Mappings script started';
     AddMessage(MMPanel,'[Info]',MMessage ,MSource , Prj.DM_ProjectFileName, '', '', cIconInfo);
+    WS.DM_ShowMessageView;
 
     BeginHourGlass(crHourGlass);
 
@@ -134,7 +194,7 @@ Begin
         PrjReport.Add(PadRight(SMess, 20) + IntLibMan.InstalledLibraryPath(I));
     end;
 
-    TotSLinkCount :=0;
+    TotLLinkCount :=0;
     TotFLinkCount :=0;
 
     PrjReport.Add('');
@@ -151,7 +211,7 @@ Begin
             PrjReport.Add('Unmatched in SchDoc : ' + IntToStr(I + 1) + ' '+ Comp.DM_FullLogicalDesignatorForDisplay
                           + '  ' + Comp.DM_LibraryReference);
             MMObjAddr := Comp.DM_ObjectAdress;
-            MMessage := 'UnMatched Component  : '+ IntToStr(I) + ' |  Name : ' + Chr(34) + Comp.DM_LibraryReference + Chr(34) + '  ' + Comp.DM_FullLogicalDesignatorForDisplay;
+            MMessage := 'UnMatched Sch Component  : '+ IntToStr(I) + ' | ' + Comp.DM_FullLogicalDesignatorForDisplay + ' | ' + Comp.DM_LibraryReference;
             //                                                            'CrossProbeConnective=' + IntToStr(MMObjAddr)
             AddMessage(MMPanel, '[Info]', MMessage , MSource, Comp.DM_OwnerDocumentFullPath, 'WorkspaceManager:View', 'CrossProbeConnective=' + IntToStr(MMObjAddr), IMG_Component);
         end;
@@ -160,38 +220,44 @@ Begin
         begin
             Comp := PrjMapping.DM_UnmatchedTargetComponent(I);
             PrjReport.Add('Unmatched in PcbDoc : ' + IntToStr(I + 1) + ' ' + Comp.DM_FullLogicalDesignatorForDisplay
-                          + '  ' + Comp.DM_FootPrint);
+                          + '  ' + Comp.DM_FootPrint + '  ' + Comp.DM_LibraryReference);
             MMObjAddr := Comp.DM_ObjectAdress;
-            MMessage := 'UnMatched Component  : '+ IntToStr(I) + ' |  Name : ' + Chr(34) + Comp.DM_LibraryReference + Chr(34);
-            //                                                            'CrossProbeConnective=' + IntToStr(MMObjAddr)
+            MMessage := 'UnMatched PCB Component  : '+ IntToStr(I) + ' | ' + Comp.DM_FullLogicalDesignatorForDisplay + + ' | ' + Comp.DM_FootPrint;
+
+// this is not working..
+            if Comp.DM_ImplementationCount > 0 then
+                MMessage := MMessage + ' | ' + FindParameterValue(Comp , 'Library Name');
+
             AddMessage(MMPanel, '[Info]', MMessage , MSource, PrimDoc.DM_FileName, 'WorkspaceManager:View', 'CrossProbeConnective=' + IntToStr(MMObjAddr), IMG_Component);
         end;
 
         PrjReport.Add('');
     end;
 
+    PrjReport.Add('Matched components in SchDoc(s) : ' + IntToStr(PrjMapping.DM_MatchedComponentCount) );
+
     For I := 0 to (Prj.DM_PhysicalDocumentCount - 1) Do
     Begin
         Doc := Prj.DM_PhysicalDocuments(I);
         If Doc.DM_DocumentKind = cDocKind_Sch Then
         begin
-            SLinkCount := 0; FLinkCount := 0;
+            LLinkCount := 0; FLinkCount := 0;
 
             PrjReport.Add('');
-            PrjReport.Add('  Sheet  : ' + Doc.DM_FileName);
+            PrjReport.Add('');
+            PrjReport.Add('Sheet : ' + IntToStr(I+1) + '  ' + Doc.DM_FileName + ' ' + IntToStr(Doc.DM_ChannelIndex) );
             PrjReport.Add('');
             for J := 0 to Doc.DM_ComponentCount - 1 Do
             begin
                 Comp := Doc.DM_Components(J);
 
-                PrjReport.Add(' Component LogDes : ' + Comp.DM_LogicalDesignator + '  | PhysDes: ' + Comp.DM_PhysicalDesignator + '  | CalcDes: ' + Comp.DM_CalculatedDesignator);
+                PrjReport.Add(IntToStr(J+1) + ' Component LogDes : ' + Comp.DM_LogicalDesignator + '  | PhysDes: ' + Comp.DM_PhysicalDesignator + '  | CalcDes: ' + Comp.DM_CalculatedDesignator);
                 PrjReport.Add(' Lib Reference    : ' + Comp.DM_LibraryReference);
                 PrjReport.Add(' Comp FootPrint   : ' + Comp.DM_FootPrint);
                 PrjReport.Add(' Current FP Model : ' + Comp.DM_CurrentImplementation(cDocKind_PcbLib).DM_ModelName + '  ModelType :' + Comp.DM_CurrentImplementation(cDocKind_PcbLib).DM_ModelType);
 
 // report the project mapping source sch to target pcb
 // Matched Source & Target have the same index
-
 
 
                 for K := 0 to (PrjMapping.DM_MatchedComponentCount - 1) do
@@ -201,20 +267,126 @@ Begin
                         TargetComp := PrjMapping.DM_MatchedTargetComponent(K);
                         CompImpl := Comp.DM_CurrentImplementation(cDocKind_PcbLib);
                         TargetImpl := TargetComp.DM_CurrentImplementation(cDocKind_PcbLib);
-                        PrjReport.Add(' Mapping Target : ' + IntToStr(K) + ' | Des: ' + TargetComp.DM_FullLogicalDesignatorForDisplay);
+                    //    PrjReport.Add(' Mapping Target : ' + IntToStr(K) + ' | Des: ' + TargetComp.DM_FullLogicalDesignatorForDisplay);
                         TargetImpl.DM_DatafileCount ;
                         CompImpl.DM_DatafileCount;
 
-                        if CompImpl.DM_ModelName <> TargetImpl.DM_ModelName then
-                            PrjReport.Add('Not matching Source-Target FP ModelNames');
-                                                                              // TargetComp.DM_DatafileLibId DNEX
-                        if Comp.DM_SourceLibraryName <> TargetComp.DM_SourceLibraryName then
-//                        if CompImpl.DM_D <> TargetComp.DM_SourceLibraryName  then
-                            PrjReport.Add(' mismatched FP model libs : ' + Comp.DM_SourceLibraryName + '  ' + TargetComp.DM_SourceLibraryName );
+                        if (CompImpl.DM_ModelName = TargetImpl.DM_ModelName) then
+                        begin
+                            if Comp.DM_SourceLibraryName <> TargetComp.DM_SourceLibraryName then
+                            begin
+                                PrjReport.Add('*** mismatched FP model libs : ' + Comp.DM_SourceLibraryName + ' <> ' + TargetComp.DM_SourceLibraryName + '  ***');
+                                inc(LLinkCount);
+                            end;
+
+// report component level parameters
+//                            if (Comp.DM_ParameterCount <> TargetComp.DM_ParameterCount) then
+//                                PrjReport.Add(' mismatch parameter count : Sch | PCB' + PadRight(IntToStr(Comp.DM_ParameterCount), 3) + ' | ' + PadRight(IntToStr(TargetComp.DM_ParameterCount), 3));
+
+                            for L := 0 to (Comp.DM_ParameterCount - 1) do
+                            begin
+                                Param := Comp.DM_Parameters(L);
+                                M := 0;
+                                bFound := false;
+                                while (not bFound) and (M < TargetComp.DM_ParameterCount) do
+                                begin
+                                    FPParam := TargetComp.DM_Parameters(M);
+                                    Inc(M);
+                                    if (FPParam.DM_Name = Param.DM_Name) then
+                                    begin
+                                        bFound := true;
+                                        if (FPParam.DM_Value <> Param.DM_Value) then
+                                            PrjReport.Add('*** mismatch parameter value for ' + Param.DM_Name + ' | ' + Param.DM_Value + ' <> ' + FPParam.DM_Value + ' ***');
+                                    end;
+                                    Param.DM_Kind;
+                                    Param.DM_ConfigurationName;
+                                end;
+                                if not bFound then
+                                    if not CheckIgnoreParameter(Param.DM_Name) then
+                                        PrjReport.Add('*** missing FP parameter ' + PadRight(IntToStr(L + 1), 3) + '  ' + Param.DM_Name + ' | ' + Param.DM_Value + ' ***');
+                            end;
+
+                        end
+                        else begin
+                            PrjReport.Add('***  non-matching Source-Target FP ModelNames  ***');
+                            inc(FLinkCount);
+                        end;
+
 
                     end;
                 end;  // k prjmapping
+
+                PrjReport.Add('');
+            end;  // j dm_components
+
+
+            PrjReport.Add('');
+            TotLLinkCount := TotLLinkCount + LLinkCount;
+            TotFLinkCount := TotFLinkCount + FLinkCount;
+        end;
+    End;  // i physical docs.
+
+// report project level parameters
+    for I := 0 to Prj.DM_ParameterCount - 1 Do
+    begin
+        Param := Prj.DM_Parameters(I);
+        PrjReport.Add(PadRight(IntToStr(I + 1), 3)+ Param.DM_Name + ' ' + Param.DM_Value + ' ' + Param.DM_Description);
+        Param.DM_ConfigurationName;
+        Param.DM_Kind;
+        Param.DM_RawText;
+
+        Param.DM_OriginalOwner;
+        Param.DM_Visible;
+    end; // i prj parameters
+
+    PrjReport.Insert(2, 'Total Mismatched Model Library Link Count : ' + IntToStr(TotLLinkCount));
+    PrjReport.Insert(3, 'Total Mismatched Model Name Links   Count : ' + IntToStr(TotFLinkCount));
+    PrjReport.Add('===========  EOF  ==================================');
+
+
+
+    FilePath := ExtractFilePath(Prj.DM_ProjectFullPath);
+    FileName := FilePath + ExtractFileName(Prj.DM_ProjectFileName) + '_ReportMappings.Txt';
+    PrjReport.SaveToFile(FileName);
+
+    EndHourGlass;
+
+    WS := GetWorkspace;
+    WS.DM_ShowMessageView;
+    //Prj.DM_AddSourceDocument(FileName);
+    ReportDocument := Client.OpenDocument('Text', FileName);
+    If ReportDocument <> Nil Then
+        Client.ShowDocument(ReportDocument);
+
+End;
+
+// see Project/OutJob-Script/SimpleOJScript.pas.
+
+//      first 7 parameters are system NOT user..
+//            'Component Kind'
+//            'Component Type'
+//            'Description'
+//            'Designator'
+//            'Footprint'
+//            'Library Reference'
+//            'Pin Count'
+//            'Ibis Model'
+
+
+
+
+{..............................................................................}
+// Function DM_UnmatchedSourceComponent(Index : Integer) : IComponent;  Returns the indexed unmatched source component, that is, a target component could not be found to map to this source component. Use the DM_UnmatchedSourceComponentCount function.
+// Function DM_UnmatchedTargetComponent(Index : Integer) : IComponent;  Returns the indexed unmatched target component, that is, a source component could not be found to map to the target component. Use the DM_UnmatchedTargetComponentCount function.
+// Function DM_MatchedComponentCount: Integer;  Returns the number of matched components.
+// Function DM_MatchedSourceComponent  (Index : Integer) : IComponent;  Returns the indexed matched source component (that has been matched with a target component). Use the DM_MatchedSourceComponentCount function.
+// Function DM_MatchedTargetComponent  (Index : Integer) : IComponent;  Returns the indexed matched source component (that has been matched with a target component). Use the DM_MatchedTargetComponentCount function.
+
 {
+var
+    PCBComp        : IPCB_Component;
+    Iterator       : IPCB_BoardIterator;
+
                 for K := 0 to (Comp.DM_ImplementationCount - 1) do
                 begin
                     CompImpl := Comp.DM_Implementations(K);
@@ -249,66 +421,4 @@ Begin
 
                 end;  // k implementations
 }
-
-//   report component level parameters
-                for K := 0 to (Comp.DM_ParameterCount - 1) do
-                begin
-                    Param := Comp.DM_Parameters(K);
-                    PrjReport.Add(Param.DM_Name + ' ' + Param.DM_Value); // + ' ' + Param.DM_Description);
-                end;
-
-                PrjReport.Add('');
-            end;  // j dm_components
-
-
-            PrjReport.Add('');
-                TotSLinkCount := TotSLinkCount + SLinkCount;
-                TotFLinkCount := TotFLinkCount + FLinkCount;
-        end;
-    End;  // i physical docs.
-
-// report project level parameters
-    for I := 0 to Prj.DM_ParameterCount - 1 Do
-    begin
-        Param := Prj.DM_Parameters(I);
-        PrjReport.Add(Param.DM_Name + ' ' + Param.DM_Value + ' ' + Param.DM_Description);
-        Param.DM_ConfigurationName;
-        Param.DM_Kind;
-        Param.DM_RawText;
-
-        Param.DM_OriginalOwner;
-        Param.DM_Visible;
-    end; // i prj parameters
-
-    PrjReport.Insert(2, 'Total Missing Sch Symbol Link Count : ' + IntToStr(TotSLinkCount));
-    PrjReport.Insert(3, 'Total Missing Footprint Link Count  : ' + IntToStr(TotFLinkCount));
-    PrjReport.Add('===========  EOF  ==================================');
-
-
-
-    FilePath := ExtractFilePath(Prj.DM_ProjectFullPath);
-    FileName := FilePath + ExtractFileName(Prj.DM_ProjectFileName) + '_ReportMappings.Txt';
-    PrjReport.SaveToFile(FileName);
-
-    EndHourGlass;
-
-    WS := GetWorkspace;
-    WS.DM_ShowMessageView;
-    //Prj.DM_AddSourceDocument(FileName);
-    ReportDocument := Client.OpenDocument('Text', FileName);
-    If ReportDocument <> Nil Then
-        Client.ShowDocument(ReportDocument);
-
-End;
-
-// see Project/OutJob-Script/SimpleOJScript.pas.
-
-
-
-{..............................................................................}
-// Function DM_UnmatchedSourceComponent(Index : Integer) : IComponent;  Returns the indexed unmatched source component, that is, a target component could not be found to map to this source component. Use the DM_UnmatchedSourceComponentCount function.
-// Function DM_UnmatchedTargetComponent(Index : Integer) : IComponent;  Returns the indexed unmatched target component, that is, a source component could not be found to map to the target component. Use the DM_UnmatchedTargetComponentCount function.
-// Function DM_MatchedComponentCount: Integer;  Returns the number of matched components.
-// Function DM_MatchedSourceComponent  (Index : Integer) : IComponent;  Returns the indexed matched source component (that has been matched with a target component). Use the DM_MatchedSourceComponentCount function.
-// Function DM_MatchedTargetComponent  (Index : Integer) : IComponent;  Returns the indexed matched source component (that has been matched with a target component). Use the DM_MatchedTargetComponentCount function.
 
