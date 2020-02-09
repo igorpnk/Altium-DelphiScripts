@@ -1,10 +1,11 @@
 {..............................................................................
  Summary 
-         Project focused comparison of FP model names & paths
-         Uses Component iterators etc to be able to set symbol lib links      
-         Footprints should be in same IntLib as symbols.
+         Project focused comparison of FP model names & paths & parameters
+         Uses Project Component mapping etc
+         Reports unmapped comps in Sch & PCB      
 
-         This code does check (untested!) footprint source matches FPcomponent source !!
+         Uses Board iterator method to check Prj/Sch footprint source matches FPcomponent source !!
+         Footprints should be sourced from same IntLib as component symbols.
          System like parameters in SchDoc/Prj component are ignored.
          Extra parameters in PCB FP component are ignored
 
@@ -14,6 +15,7 @@ B. Miller
 07/02/2020  v0.3  report cleanup: report differences of model names, libraries & parameters
 08/02/2020  v0.31 Fix check all parameters & go back to old PCB iterator method for library checks.
                   CompImpl.DM_DatafileLibraryIdentifier(0) does not work for all comps.
+09/02/2020  v0.32 Compare designators, add startup helper messages, refresh report doc view.
 
 
 ..............................................................................}
@@ -71,8 +73,8 @@ begin
         Result := true;
     'Description'       :
         Result := true;
-    'Designator'        :
-        Result := true;
+//    'Designator'        :
+//        Result := false;    // true;
     'Footprint'         :
         Result := true;
     'Library Name'      :
@@ -174,34 +176,45 @@ Begin
     If WS = Nil Then Exit;
 
     Prj := WS.DM_FocusedProject;
-    If Prj = Nil Then Exit;
+    If Prj = Nil then
+    begin
+        ShowMessage('Project required !');
+        Exit;
+    end;
+
+    if Prj.DM_ObjectKindString <> 'PCB Project' then  //cDocKind_PcbProject  is wrong
+    begin
+        ShowMessage('Project is NOT of a PCB board');
+        Exit;
+    end;
 
     Prj.DM_Compile;
 
     IntLibMan := IntegratedLibraryManager;
     If IntLibMan = Nil Then Exit;
 
-    Board := PCBServer.GetCurrentPCBBoard;
     PrimDoc := Prj.DM_PrimaryImplementationDocument;
-    if PrimDoc = nil then exit;
-    If Board = nil then
+    if PrimDoc = Nil then
+    begin
+        ShowMessage('Project has no board / PcbDoc !');
+        exit;
+    end;
+
+    if PCBServer = Nil then Client.StartServer('PCB');
+    Board := PCBServer.GetCurrentPCBBoard;
+    If Board = Nil then
         Board := PcbServer.GetPcbBoardByPath(PrimDoc.DM_FullPath);
     if Board = Nil then
         Board := PcbServer.LoadPcbBoardByPath(PrimDoc.DM_FullPath);
-    If Board = Nil Then Exit;
+    If Board = Nil Then
+    begin
+        ShowMessage('Unable to open/load PcbDoc !');
+        Exit;
+    end;
 
 // for the DMObject Componentmapping interface
-    PrjMapping := Prj.DM_ComponentMappings(PrimDoc.DM_FullPath);   //Board.FileName);
+    PrjMapping := Prj.DM_ComponentMappings(PrimDoc.DM_FullPath);
 
-// required for the Board interface iterating eCompObject
-{    If PCBServer = Nil then Client.StartServer('PCB');
-    Board := PCBServer.GetCurrentPCBBoard;
-    If Board = Nil Then
-    Board := PCBServer.GetPCBBoardByPath(PrimDoc.DM_FullPath);
-    If Board = Nil Then
-        Board := PCBServer.LoadPCBBoardByPath(PrimDoc.DM_FullPath);
-    if Board = Nil then Exit;
-}
     MMPanel := WS.DM_MessagesManager;
     MMPanel.ClearMessages;
     WS.DM_ShowMessageView;
@@ -227,7 +240,7 @@ Begin
 
     for I := 0 to (IntLibMan.InstalledLibraryCount - 1) Do
     begin
-        case LibraryType(IntLibMan.InstalledLibraryPath(I)) of     // fn from common libIntLibMan.pas
+        case LibraryType(IntLibMan.InstalledLibraryPath(I)) of       // fn from common libIntLibMan.pas
             eLibIntegrated : SMess := 'Integrated Lib : ';
             eLibDatabase   : SMess := 'dBase Library  : ';
 // TLibraryType = (eLibIntegrated, eLibSource, eLibDatafile, eLibDatabase, eLibNone, eLibQuery, eLibDesignItems);
@@ -294,11 +307,11 @@ Begin
             for J := 0 to Doc.DM_ComponentCount - 1 Do
             begin
                 Comp := Doc.DM_Components(J);
-
-                PrjReport.Add(IntToStr(J+1) + ' Component LogDes : ' + Comp.DM_LogicalDesignator + '  | PhysDes: ' + Comp.DM_PhysicalDesignator + '  | CalcDes: ' + Comp.DM_CalculatedDesignator);
-                PrjReport.Add(' Lib Reference    : ' + Comp.DM_LibraryReference);
-                PrjReport.Add(' Comp FootPrint   : ' + Comp.DM_FootPrint);
-                PrjReport.Add(' Current FP Model : ' + Comp.DM_CurrentImplementation(cDocKind_PcbLib).DM_ModelName + '  ModelType :' + Comp.DM_CurrentImplementation(cDocKind_PcbLib).DM_ModelType);
+                Comp.DM_AssignedDesignator;
+                PrjReport.Add(IntToStr(J+1) + ' Component Designator Assigned : ' + Comp.DM_AssignedDesignator + '  | Logical : ' + Comp.DM_LogicalDesignator + '  | Physical : ' + Comp.DM_PhysicalDesignator + '  | Calculated : ' + Comp.DM_CalculatedDesignator);
+                PrjReport.Add(' Lib Reference         : ' + Comp.DM_LibraryReference);
+                PrjReport.Add(' Comp FootPrint        : ' + Comp.DM_FootPrint);
+                PrjReport.Add(' Current FP Model Name : ' + Comp.DM_CurrentImplementation(cDocKind_PcbLib).DM_ModelName + '  Type : ' + Comp.DM_CurrentImplementation(cDocKind_PcbLib).DM_ModelType);
 
              // old way to get PCB footprint
                 PCBComp := FindPCBComponent(Comp);
@@ -341,6 +354,10 @@ Begin
 // report component level parameters
 //                            if (Comp.DM_ParameterCount <> TargetComp.DM_ParameterCount) then
 //                                PrjReport.Add(' mismatch parameter count : Sch | PCB' + PadRight(IntToStr(Comp.DM_ParameterCount), 3) + ' | ' + PadRight(IntToStr(TargetComp.DM_ParameterCount), 3));
+
+// most designator properties are '' for PCB comp
+                            if Comp.DM_CalculatedDesignator <> TargetComp.DM_FullLogicalDesignatorForDisplay then
+                                PrjReport.Add('*** mismatch Designator for ' + Comp.DM_CalculatedDesignator + ' <> ' + TargetComp.DM_FullLogicalDesignatorForDisplay);
 
                             for L := 0 to (Comp.DM_ParameterCount - 1) do
                             begin
@@ -418,8 +435,11 @@ Begin
     //Prj.DM_AddSourceDocument(FileName);
     ReportDocument := Client.OpenDocument('Text', FileName);
     If ReportDocument <> Nil Then
+    begin
         Client.ShowDocument(ReportDocument);
-
+        if (ReportDocument.GetIsShown <> 0 ) then
+            ReportDocument.DoFileLoad;
+    end;
 End;
 
 // see Project/OutJob-Script/SimpleOJScript.pas.
