@@ -11,6 +11,8 @@ from CompRenameSch.pas Ver 1.2 & ExplicitModelSourceInLibs.pas
 
 20/02/2020  0.10 POC     not finished..
 26/02/2020  0.20 Seems to work on Comp symbol & FP models
+27/02/2020  0.21 Store full vfs DBLib/Table into ModelDatafile.Location (.UseCompLib=true overrides anyway!)
+
 
 DBLib:
     Component is defined in the table.
@@ -139,8 +141,8 @@ Begin
     ExDBTable   := 'dummy-resistor';            // has to match existing to make change
     NewDBTable  := 'STD_Resistor';              // DB table name
 
-//    ExDBTable   := 'STD_Resistor';
-//    NewDBTable  := 'dummy-resistor';
+    ExDBTable   := 'STD_Resistor';
+    NewDBTable  := 'dummy-resistor';
 
     // Create a TStringList object to store data
     ReportInfo := TStringList.Create;
@@ -188,6 +190,9 @@ Begin
                 ReportInfo.Add('');
             end;
 
+// if changed then reuse for models.
+            CompDBTable    := Component.DatabaseTableName;
+
             SchServer.RobotManager.SendMessage(Component.I_ObjectAddress, c_BroadCast, SCHM_BeginModify, c_NoEventData);
 
             ImplIterator := Component.SchIterator_Create;
@@ -204,28 +209,36 @@ Begin
                     // ReportInfo.Add('   Component is in an IntegLib: '  + BoolToStr(SchImplementation.UseComponentLibrary, True));
   //                  ReportInfo.Add('   DatabaseModel:     '            + BoolToStr(SchImplementation.DatabaseModel,   true));
   //                  ReportInfo.Add('   IntegratedModel:   '            + BoolToStr(SchImplementation.IntegratedModel, true));
+                    SchImplementation.GetState_IdentifierString;
+
+                    SchImplementation.UseComponentLibrary := False;
 
                     For i := 0 To (SchImplementation.DatafileLinkCount - 1) Do
                     Begin
                         ModelDataFile := SchImplementation.DatafileLink[i];
                         If ModelDataFile <> Nil Then
-                            if ModelDataFile.FileKind = cDocKind_PcbLib then
+                            if UpperCase(ModelDataFile.FileKind) = UpperCase(cDocKind_PcbLib) then
                             Begin
                                 ModelLibPath := ModelDataFile.Location;
                                 ModelLibName := ExtractFilename(ModelLibPath);
-                                ReportInfo.Add('   Existing Model Data File Location: ' + ModelLibPath +
-                                               ', Entity Name: '         + ModelDataFile.EntityName);
 
-                                if (ModelLibName = ExCompLib) then
+                                if (ansipos(ExCompLib, ModelLibName) > 1) or (ModelLibName = '') then
                                 begin
-                                    ModelDataFile.Location := NewLibID;
-                            // Ticks the bottom option (IntLib complib) in PCB footprint dialogue
-                            // but only for SchDoc as compiler will change the SchLib link to IntLib.
-                                    SchImplementation.UseComponentLibrary := True;
+                                    ModelDataFile.Location := NewCompLib;
+                                    if CompDBTable <> '' then
+                                        ModelDataFile.Location := NewCompLib + '/' + CompDBTable;
+
+                                    ReportInfo.Add('   Existing Model Name : ' + ModelDataFile.EntityName + '    Data File Location : ' + ModelLibPath +
+                                                   '    New Library Loc : ' + ModelDataFile.Location);
 
                                 end;
                             End;
                     End;
+
+                   // sets/Ticks the bottom option (from CompLib) in PCB footprint dialogue
+                    // but only for SchDoc as compiler will change the SchLib link to IntLib.
+                    SchImplementation.UseComponentLibrary := True;
+
                     SchImplementation := ImplIterator.NextSchObject;
                 End;
 
