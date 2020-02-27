@@ -13,7 +13,8 @@ Summary
  2019/09/20 : Delete Model Datafile links only
  2019/09/25 : Add new proc; less distructive just sets PcbLib = '*'
  2020/02/27 v1.0 Remove lib path for Sch component & FP models (set "Any").
-
+ 2020/02/27 v1.1 Diff report info for SchLib vs SchDoc & tweaks for SchLibs
+                 No special treatment for DbLib sourced comps..
 ..................................................................................}
 
 {..............................................................................}
@@ -88,6 +89,9 @@ Var
     ModelDataFile      : ISch_ModelDatafileLink;
     CompSrcLibName     : WideString;
     CompDBTable        : WideString;
+    CompDesignId       : WideString;
+    CompLibRef         : WideString;
+
 
     FPCount            : Integer;
     FLinkCount         : Integer;
@@ -126,15 +130,26 @@ Begin
         Begin
             CompSrcLibName := Component.SourceLibraryName;
             CompDBTable    := Component.DatabaseTableName;
+            CompDesignId   := Component.DesignItemId;
+            CompLibRef     := Component.LibReference;
 
             SchServer.RobotManager.SendMessage(Component.I_ObjectAddress, c_BroadCast, SCHM_BeginModify, c_NoEventData);
 
-//   don't trash DBLib components.
             if CurrentSheet.ObjectID = eSheet then
-                if CompDBTable = '' then
-                    Component.SetState_SourceLibraryName('*');
+                Component.SetState_SourceLibraryName('*');
 
-            ModelsList.Add (Component.Designator.Text + ' Comp LibRef : ' + Component.LibReference + '   ExCompSrcLib : ' + CompSrcLibName);
+            if CurrentSheet.ObjectID = eSchLib then
+            begin
+                Component.SetState_SourceLibraryName('');
+                Component.LibraryPath       := ExtractFileName(CurrentSheet.DocumentName);
+                Component.DesignItemId      := CompLibRef;
+            end;
+
+            if CurrentSheet.ObjectID = eSheet then
+                ModelsList.Add (Component.Designator.Text + ' Comp DesignID : ' + CompDesignId + '   ExCompSrcLib : ' + CompSrcLibName)
+            else
+                ModelsList.Add (' Comp LibRef : ' + CompLibRef + '   ExCompSrcLib : ' + CompSrcLibName);
+
             FPCount := 0;
 
             ImplIterator := Component.SchIterator_Create;
@@ -146,21 +161,17 @@ Begin
                 Begin
                     If SchImplementation.ModelType = cModelType_PCB then
                     Begin
-//   don't trash DBLib components
-                        if CompDBTable = '' then
-                        begin
-                            Inc(FPCount);
-                            SchImplementation.UseComponentLibrary := False;
+                        Inc(FPCount);
+                        SchImplementation.UseComponentLibrary := False;
 //      replace libpath
-                            ModelDataFile := SchImplementation.DatafileLink[0];
-                            if ModelDataFile <> nil then
-                                ModelDataFile.Location := '';       // == Any   in FP model dialog
+                        ModelDataFile := SchImplementation.DatafileLink[0];
+                        if ModelDataFile <> nil then
+                            ModelDataFile.Location := '';       // == Any   in FP model dialog
 
-                            ModelsList.Add    ('     Deleted FP model lib path link for : ' + SchImplementation.ModelName);
+                        ModelsList.Add    ('     Deleted FP model lib path link for : ' + SchImplementation.ModelName);
 
-                            Inc(FLinkCount);
-                        end;
-                    End;
+                        Inc(FLinkCount);
+                    end;
                     SchImplementation := ImplIterator.NextSchObject;
                 End;
 
