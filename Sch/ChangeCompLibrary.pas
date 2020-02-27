@@ -12,6 +12,7 @@ from CompRenameSch.pas Ver 1.2 & ExplicitModelSourceInLibs.pas
 20/02/2020  0.10 POC     not finished..
 26/02/2020  0.20 Seems to work on Comp symbol & FP models
 27/02/2020  0.21 Store full vfs DBLib/Table into ModelDatafile.Location (.UseCompLib=true overrides anyway!)
+27/02/2020  0.22 better ModelDataFile.ModelType test
 
 
 DBLib:
@@ -134,15 +135,15 @@ Begin
     ExCompLib  := 'Database_Libs1.DbLib';        // Existing DbLib
     NewCompLib := 'dummy_Libs1.DbLib';           // New target DbLib fullname
 
-    ExCompLib   := 'dummy_Libs1.DbLib';
-    NewCompLib  := 'Database_Libs1.DbLib';
+//    ExCompLib   := 'dummy_Libs1.DbLib';
+//    NewCompLib  := 'Database_Libs1.DbLib';
 
 // DB Table names
     ExDBTable   := 'dummy-resistor';            // has to match existing to make change
     NewDBTable  := 'STD_Resistor';              // DB table name
 
-    ExDBTable   := 'STD_Resistor';
-    NewDBTable  := 'dummy-resistor';
+//    ExDBTable   := 'STD_Resistor';
+//    NewDBTable  := 'dummy-resistor';
 
     // Create a TStringList object to store data
     ReportInfo := TStringList.Create;
@@ -217,7 +218,7 @@ Begin
                     Begin
                         ModelDataFile := SchImplementation.DatafileLink[i];
                         If ModelDataFile <> Nil Then
-                            if UpperCase(ModelDataFile.FileKind) = UpperCase(cDocKind_PcbLib) then
+                            if ModelDataFile.ModelType = cModelType_PCB then
                             Begin
                                 ModelLibPath := ModelDataFile.Location;
                                 ModelLibName := ExtractFilename(ModelLibPath);
