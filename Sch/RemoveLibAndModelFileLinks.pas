@@ -5,6 +5,9 @@
 Summary
   Removes Component library & Footprint Model Datafile Link, NOT the FP model entry
 
+AD17: Comps in SchDoc sourced from DbLib (can) have .SymbolRef linked to shared symbol.
+This causes problem making SchLib from these Comps.
+
            Look out for extra spaces in footprint names!! great time waster ..
  20180706 : BLM Version 1
  20180806 : BLM ver 1.1   moved new FPmodel load outside of loops!
@@ -12,9 +15,11 @@ Summary
 
  2019/09/20 : Delete Model Datafile links only
  2019/09/25 : Add new proc; less distructive just sets PcbLib = '*'
- 2020/02/27 v1.0 Remove lib path for Sch component & FP models (set "Any").
- 2020/02/27 v1.1 Diff report info for SchLib vs SchDoc & tweaks for SchLibs
-                 No special treatment for DbLib sourced comps..
+ 2020/02/27 v1.0  Remove lib path for Sch component & FP models (set "Any").
+ 27/02/2020 v1.1  Diff report info for SchLib vs SchDoc & tweaks for SchLibs
+                  No special treatment for DbLib sourced comps..
+ 28/02/2020 v1.2  Overwrite .SymbolReference so DBLib sourced comps can be made into SchLib.
+
 ..................................................................................}
 
 {..............................................................................}
@@ -91,7 +96,7 @@ Var
     CompDBTable        : WideString;
     CompDesignId       : WideString;
     CompLibRef         : WideString;
-
+    CompSymRef         : WideString;
 
     FPCount            : Integer;
     FLinkCount         : Integer;
@@ -132,21 +137,27 @@ Begin
             CompDBTable    := Component.DatabaseTableName;
             CompDesignId   := Component.DesignItemId;
             CompLibRef     := Component.LibReference;
+            CompSymRef     := Component.SymbolReference;
 
             SchServer.RobotManager.SendMessage(Component.I_ObjectAddress, c_BroadCast, SCHM_BeginModify, c_NoEventData);
 
             if CurrentSheet.ObjectID = eSheet then
+            begin
                 Component.SetState_SourceLibraryName('*');
+//   fix making SchLib from DbLib sourced components.
+                Component.SymbolReference := CompDesignId;
+            end;
 
             if CurrentSheet.ObjectID = eSchLib then
             begin
                 Component.SetState_SourceLibraryName('');
-                Component.LibraryPath       := ExtractFileName(CurrentSheet.DocumentName);
-                Component.DesignItemId      := CompLibRef;
+//                                                     stop fixing things !
+                Component.LibraryPath    := '';    //   := ExtractFileName(CurrentSheet.DocumentName);
+                Component.DesignItemId   := CompLibRef;
             end;
 
             if CurrentSheet.ObjectID = eSheet then
-                ModelsList.Add (Component.Designator.Text + ' Comp DesignID : ' + CompDesignId + '   ExCompSrcLib : ' + CompSrcLibName)
+                ModelsList.Add (Component.Designator.Text + ' Comp DesignID : ' + CompDesignId + '   ExCompSrcLib : ' + CompSrcLibName + '   ExSymRef : ' + CompSymRef)
             else
                 ModelsList.Add (' Comp LibRef : ' + CompLibRef + '   ExCompSrcLib : ' + CompSrcLibName);
 
