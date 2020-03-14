@@ -2,6 +2,7 @@
 
 BL Miller
 14/03/2020  v0.10 POC example.
+15/03/2020  v0.11 File exists tested the wrong (outfile) file & check/create new paths
 
 use in OutJob container as part of project
 script must be part of the board project
@@ -9,7 +10,7 @@ Can be called directly or via Outjob interface.
 
 Outfile is setup by "Change" button
 Infile could be setup from "Configure" (pop up a form)
-Infile is using the SAME path as the outputfile.
+Infile is using the SAME path as the outputfile. This WILL FAIL when a new output path is defined!!
 
 Direct call test method enables "open outputs".
 }
@@ -82,6 +83,7 @@ var
     OutLine     : WideString;
     OpenOutputs : boolean;
     I, J        : integer;
+    bFSuccess   : boolean;
 
 begin
     Param := TParameter;
@@ -107,17 +109,29 @@ begin
     ParamList.Destroy;
     Param := nil;
 
+// very bad idea to link the input file to the same path as output (dynamic)
+// better to make this a project path.
     CSV_Path := TargetFD + SourceFN;
 
 // 'Path of my new POS file with the right format and extension
     POS_Path := TargetFD + TargetFN;
 
-    AssignFile(OutputFile, POS_Path);
-    Rewrite(OutputFile);
+    bFSuccess := true;
+    if not DirectoryExists(RemoveSlash(TargetFD, '\'), false) then
+        bFSuccess := CreateDir(RemoveSlash(TargetFD, '\') );
 
-    if not FileExists(POS_Path, false) then
+    if bFSuccess then
     begin
-        ShowMessage('File not found : ' + POS_Path);
+        AssignFile(OutputFile, POS_Path);
+        Rewrite(OutputFile);
+    end else
+    begin
+        ShowMessage('File/path not found : ' + TargetFD);
+        exit;
+    end;
+    if not FileExists(CSV_Path, false) then
+    begin
+        ShowMessage('File not found : ' + CSV_Path);
         exit;
     end;
     AssignFile(InputFile, CSV_Path);
