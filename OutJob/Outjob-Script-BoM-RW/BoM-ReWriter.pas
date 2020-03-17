@@ -3,6 +3,7 @@
 BL Miller
 14/03/2020  v0.10 POC example.
 15/03/2020  v0.11 File exists tested the wrong (outfile) file & check/create new paths
+18/03/2020  v0.12 Fix bug in generate (no source file parameter) if configure had never been run
 
 use in OutJob container as part of project
 script must be part of the board project
@@ -100,8 +101,9 @@ begin
     Param := ParamList.GetState_ParameterByName('TargetPrefix');
 //    TargetPrefix := Param.Value;
 
-    Param := ParamList.GetState_ParameterByName(cSourceFileNameParameter);    // input target name from Configure()
-    SourceFN := Param.Value;
+    SourceFN := cDefaultInputFileName;
+    Param    := ParamList.GetState_ParameterByName(cSourceFileNameParameter);    // input target name from Configure()
+    if Param <> nil then SourceFN := Param.Value;                                // in case configure was never run.
 
     OpenOutputs := false;
     ParamList.GetState_ParameterAsBoolean('OpenOutputs', OpenOutputs);
