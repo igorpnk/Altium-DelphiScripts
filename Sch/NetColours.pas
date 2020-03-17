@@ -13,6 +13,7 @@
 BL Miller
 15/09/2018  v0.10
 17/03/2020  v0.20 Added Colour specified NetName in current Doc.
+18/03/2020  v0.21 Refactor repeated code. Improve reporting & default = do not open.
 
 ..............................................................................}
 
@@ -72,12 +73,35 @@ begin
     end;
 end;
 
+function PrimWire_ShortDesc(APrim : ISch_GraphicalObject) : WideString;
+var
+    L1, L2, L3 : TLocation;
+
+begin
+    L1 := APrim.Location;   // is midpoint of line ?? test this ??
+    L2 := L1;
+    if APrim.VerticesCount > 0 then L1 := APrim.Vertex(1);
+    if APrim.VerticesCount > 1 then L2 := APrim.Vertex(2);
+
+    if (L2.x < L1.x) or ((L2.y < L1.y) and (L2.x = L1.x)) then
+    begin
+        L3 := L1;
+        L1 := L2;
+        L2 := L3;
+    end;
+
+//   eImperial 0  eMM 1  eMetric 1 ,  eDXP 4
+    Result := '(' + CoordUnitToStringNoUnit(L1.x, Units) + ',' +  CoordUnitToStringNoUnit(L1.y, Units)
+            + ') To ('+ CoordUnitToStringNoUnit(L2.x, Units) + ',' +  CoordUnitToStringNoUnit(L2.y, Units) + ')';
+
+    Rpt.Add('Prim SDS ' + APrim.GetState_DescriptionString + ' ' + Result);
+end;
+
 function FindMatchingNetItem(Doc : IDocument, APrim : ISch_GraphicalObject) : INetItem;
 var
     ALine      : ILine;
     ANet       : INet;
     I, J       : integer;
-    L1, L2, L3 : TLocation;
     SDS        : WideString;
 
 begin
@@ -86,40 +110,30 @@ begin
     begin
         ANet := NetList.Items(I);
         ANet.DM_NetName;
-    case APrim.ObjectID of
-    eWire :
-        begin
-            APrim.UniqueId ;                 // HYBLJPOB
-            APrim.Handle ;                   // AKTRVOOQ\HYBLJPOB
-            L1 := APrim.Location;
-            L2 := L1;
-            if APrim.VerticesCount > 0 then L1 := APrim.Vertex(1);
-            if APrim.VerticesCount > 1 then L2 := APrim.Vertex(2);
-            if (L2.x < L1.x) or ((L2.y < L1.y) and (L2.x = L1.x)) then
+        case APrim.ObjectID of
+            eWire :
             begin
-                L3 := L1;
-                L1 := L2;
-                L2 := L3;
-            end;
+                APrim.UniqueId ;                 // HYBLJPOB
+                APrim.Handle ;                   // AKTRVOOQ\HYBLJPOB
 
-        // eImperial 0  eMM 1  eMetric 1 ,  eDXP 4
+                SDS := PrimWire_ShortDesc(APrim);
 
-            SDS := '(' + CoordUnitToStringNoUnit(L1.x, Units) + ',' +  CoordUnitToStringNoUnit(L1.y, Units);
-            SDS := SDS + ') To ('+ CoordUnitToStringNoUnit(L2.x, Units) + ',' +  CoordUnitToStringNoUnit(L2.y, Units) + ')';
-
-            for J := 0 to (ANet.DM_LineCount - 1) do
-            begin
-                ALine := ANet.DM_Lines(J);
-                ALine.DM_NetIndex_Sheet ;
-
-                if SDS = ALine.DM_ShortDescriptorString  then       // '(740,940) To (820,940)'
+                for J := 0 to (ANet.DM_LineCount - 1) do
                 begin
-                    Result := ALine;
-                    break;
+                    ALine := ANet.DM_Lines(J);
+                    ALine.DM_NetIndex_Sheet ;
+
+                    if SDS = ALine.DM_ShortDescriptorString  then       // '(740,940) To (820,940)'
+                    begin
+                        Rpt.Add('Match Prim Loc ' + APrim.GetState_DescriptionString + ' ' + IntToStr(APrim.Location.x) + ' ' + IntToStr(APrim.Location.y)
+                                + ' to Line DM_L_ ' + IntToStr(ALine.DM_LX) + ' ' + IntToStr(ALine.DM_LY) );
+
+                        Result := ALine;
+                        break;
+                    end;
                 end;
             end;
-        end;
-    end;  // case
+        end;  // case
     end;  // for I
 end;
 
@@ -132,7 +146,6 @@ var
     ANet     : INet;
     AWire    : ISch_Wire;
     I, J       : integer;
-    L1, L2, L3 : TLocation;
     SDS        : WideString;
 
 begin
@@ -147,33 +160,17 @@ begin
 
     while APrim <> nil  do
     begin
-
         case APrim.ObjectId of
             eWire :                      // eWire
             begin
-                ALine := ANetItem;
-
-                L1 := APrim.Location;   // is midpoint of line ?? test this ??
-                L2 := L1;
                 APrim.GetState_DescriptionString;     //  eWire=  'Wire' ; eLine= 'Line(x1,y1)(x2,y2)'
-                if APrim.VerticesCount > 0 then L1 := APrim.Vertex(1);
-                if APrim.VerticesCount > 1 then L2 := APrim.Vertex(2);
+                SDS := PrimWire_ShortDesc(APrim);    
 
-                if (L2.x < L1.x) or ((L2.y < L1.y) and (L2.x = L1.x)) then
-                begin
-                    L3 := L1;
-                    L1 := L2;
-                    L2 := L3;
-                end;
-
-        //   eImperial 0  eMM 1  eMetric 1 ,  eDXP 4
-                SDS := '(' + CoordUnitToStringNoUnit(L1.x, Units) + ',' +  CoordUnitToStringNoUnit(L1.y, Units);
-                SDS := SDS + ') To ('+ CoordUnitToStringNoUnit(L2.x, Units) + ',' +  CoordUnitToStringNoUnit(L2.y, Units) + ')';
-
-                Rpt.Add('SDS ' + SDS);
+                ALine := ANetItem;
                 if SDS = ALine.DM_ShortDescriptorString  then       // '(740,940) To (820,940)'
                 begin
-                    Rpt.Add('Prim Loc ' + IntToStr(APrim.Location.x) + ' ' + IntToStr(APrim.Location.y) + '  Line DM_L_ ' + IntToStr(ALine.DM_LX) + ' ' + IntToStr(ALine.DM_LY) );
+                    Rpt.Add('Match Prim Loc ' + APrim.GetState_DescriptionString + ' ' + IntToStr(APrim.Location.x) + ' ' + IntToStr(APrim.Location.y)
+                          + ' to Line DM_L_ ' + IntToStr(ALine.DM_LX) + ' ' + IntToStr(ALine.DM_LY) );
                     Result := APrim;
                     break;
                 end;
@@ -379,15 +376,12 @@ begin
 
     NetList   := FetchNetsFromDoc(Doc);
 
-{    TSize eZeroSize,
-eSmall,
-eMedium,
-eLarge
-}
-    ColourNet(Doc, 'GND', eWire, StringToColor('clGreen'), eLarge);
-    ColourNet(Doc, 'VDD', eWire, StringToColor('clRed'), eLarge);
+{    TSize = ( eZeroSize, eSmall, eMedium, eLarge }
 
-    GenerateReport('ColourNet.txt', true);
+    ColourNet(Doc, 'GND', eWire, StringToColor('clGreen'), eLarge);
+    ColourNet(Doc, 'VDD', eWire, StringToColor('clRed'),   eLarge);
+
+    GenerateReport('ColourNets.txt', false);
 end;
 
 Procedure ColourANetInDoc();
@@ -423,6 +417,9 @@ Begin
         CurrentSch := SchServer.LoadSchDocumentByPath(Doc.DM_FullPath);
     If CurrentSch = Nil Then Exit;
 
+    Rpt := TStringList.Create;
+    Rpt.Add('ColourANetInDoc');
+
     Preferences := Schserver.Preferences;
     Units    := Preferences.DefaultDisplayUnit;
     UnitsSys := Preferences.DefaultUnitSystem;
@@ -450,5 +447,6 @@ Begin
     If NetObjList.Count > 0 then
         MatchSameNetAndType(Doc, NetObjList);
 
+    GenerateReport('ColourANet.txt', false);
 End;
 
