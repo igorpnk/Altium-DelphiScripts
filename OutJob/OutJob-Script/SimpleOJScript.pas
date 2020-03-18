@@ -29,6 +29,8 @@ B.L. Miller
 15/12/2018  v0.2  add outjob entry points WIP..
 17/07/2019  v0.3  Tidy up parameters, pass sourcedoc to Generate() fn.
 18/07/2019  v0.4  Added Configure form
+18/03/2020  v0.41 Fix missing user parameter when Configure is not run (at least once) before Generate
+18/03/2020  v0.42 Attempt support for relative path ticked in Change.
 ..............................................................................}
 
 Interface    // not sure this is not just ignored in delphiscript.
@@ -43,6 +45,7 @@ end;
 Const
     cDefaultReportFileName   = 'OJScript-Report.txt';    //default output report name.
     cSourceFileNameParameter = 'SourceFileName';         // Parameter Name to store static data from configure
+    cSourceFileName          = 'dummy.PcbDoc';
 
 Var
     WS               : IWorkspace;
@@ -244,6 +247,8 @@ var
     SourceFileName : WideString;
     TargetFolder   : WideString;
     TargetFN       : WideString;
+    tmpstr         : WideString;
+    I              : integer;
     AddToProject   : boolean;
     OpenOutputs    : boolean;
 
@@ -260,7 +265,10 @@ begin
     ParamList.GetState_ParameterAsBoolean('OpenOutputs', OpenOutputs);
     ParamList.GetState_ParameterAsBoolean('AddToProject', AddToProject);
     Param := ParamList.GetState_ParameterByName(cSourceFileNameParameter);
-    SourceFileName := Param.Value;
+    if Param = nil then
+        ParamList.SetState_AddOrReplaceParameter(cSourceFileNameParameter, cSourceFileName, true)
+    else
+        SourceFileName := Param.Value;
     ParamList.Destroy;
 
     if TargetFolder = '' then
@@ -268,6 +276,17 @@ begin
 // if output filename is NOT changed from default then Parameter TargetFileName = ''  dumb yeah.
     if TargetFN = '' then
         TargetFN := cDefaultReportFileName;
+
+// if TargetFd contains '.\' then is encoded as resolved relative path.
+    tmpstr := TargetFolder;
+    I := ansipos('.\', TargetFolder);
+    if I > 3 then
+    begin
+        SetLength(tmpstr, I - 1);
+        Delete(TargetFolder, 1, I + 1);
+        tmpstr := tmpstr + TargetFolder;
+        TargetFolder := tmpstr;
+    end;
 
     TargetFN := TargetFolder + TargetFN;
     ReportPCBStuff(SourceFileName, TargetFN, AddToProject, OpenOutputs);

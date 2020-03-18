@@ -4,6 +4,7 @@ BL Miller
 14/03/2020  v0.10 POC example.
 15/03/2020  v0.11 File exists tested the wrong (outfile) file & check/create new paths
 18/03/2020  v0.12 Fix bug in generate (no source file parameter) if configure had never been run
+                  Attempt support for relative path in Change.
 
 use in OutJob container as part of project
 script must be part of the board project
@@ -77,6 +78,7 @@ var
     SourceFN   : WideString;
     CSV_Path   : WideString;
     POS_Path   : WideString;
+    tmpstr     : WideString;
     Document   : IDocument;
     ParamList   : TParameterList;
     Param       : IParameter;
@@ -103,7 +105,10 @@ begin
 
     SourceFN := cDefaultInputFileName;
     Param    := ParamList.GetState_ParameterByName(cSourceFileNameParameter);    // input target name from Configure()
-    if Param <> nil then SourceFN := Param.Value;                                // in case configure was never run.
+    if Param = nil then
+        ParamList.SetState_AddOrReplaceParameter(cSourceFileNameParameter, cDefaultInputFileName, true)
+    else
+        SourceFN := Param.Value;                                                // in case configure was never run.
 
     OpenOutputs := false;
     ParamList.GetState_ParameterAsBoolean('OpenOutputs', OpenOutputs);
@@ -111,15 +116,25 @@ begin
     ParamList.Destroy;
     Param := nil;
 
+// if TargetFd contains '.\' then is encoded as resolved relative path.
+    tmpstr := TargetFd;
+    I := ansipos('.\', TargetFd);
+    if I > 5 then
+    begin
+        SetLength(tmpstr, I - 1);
+        Delete(TargetFd, 1, I + 1);
+        tmpstr := tmpstr + TargetFd;
+        TargetFd := tmpstr;
+    end;
 // very bad idea to link the input file to the same path as output (dynamic)
 // better to make this a project path.
-    CSV_Path := TargetFD + SourceFN;
+    CSV_Path := TargetFd + SourceFN;
 
 // 'Path of my new POS file with the right format and extension
-    POS_Path := TargetFD + TargetFN;
+    POS_Path := TargetFd + TargetFN;
 
     bFSuccess := true;
-    if not DirectoryExists(RemoveSlash(TargetFD, '\'), false) then
+    if not DirectoryExists(RemoveSlash(TargetFd, '\'), false) then
         bFSuccess := CreateDir(RemoveSlash(TargetFD, '\') );
 
     if bFSuccess then
