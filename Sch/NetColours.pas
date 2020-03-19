@@ -14,6 +14,7 @@ BL Miller
 15/09/2018  v0.10
 17/03/2020  v0.20 Added Colour specified NetName in current Doc.
 18/03/2020  v0.21 Refactor repeated code. Improve reporting & default = do not open.
+20/03/2020  v0.22 Added project net colour method to ColourNetsInDoc()
 
 ..............................................................................}
 
@@ -21,6 +22,7 @@ BL Miller
 
 Var
     WS           : IWorkspace;
+    Prj          : IProject;
     Rpt          : TStringList;
     NetsData     : TStringList;
     NetList      : TObjectList;
@@ -30,7 +32,6 @@ Var
 
 Procedure GenerateReport(const Filename : WideString, const Display :boolean);
 Var
-    Prj      : IProject;
     Document : IServerDocument;
     Filepath : WideString;
 
@@ -305,6 +306,24 @@ Begin
     End;
 End;
 
+Procedure RefreshSchSheetNetObjects(CurrentSch : ISch_Document);
+var
+    Iterator     : ISch_Iterator;
+    APrim        : ISch_GraphicalObject;
+
+begin
+    Iterator := CurrentSch.SchIterator_Create;
+    Iterator.AddFilter_ObjectSet(MkSet(eParameterSet, ePin, eWire, eJunction, ePort, eSheetEntry, eBusEntry, eHarnessEntry, ePowerObject, eNetLabel, eCrossSheetConnector));
+    APrim := Iterator.FirstSchObject;
+    While (APrim <> Nil) Do
+    Begin
+        SchServer.RobotManager.SendMessage(APrim.I_ObjectAddress, c_BroadCast, SCHM_BeginModify, c_NoEventData);
+        APrim.GraphicallyInvalidate;
+        SchServer.RobotManager.SendMessage(APrim.I_ObjectAddress, c_BroadCast, SCHM_EndModify, c_NoEventData);
+        APrim := Iterator.NextSchObject;
+    End;
+    CurrentSch.SchIterator_Destroy(Iterator);
+end;
 
 function ColourNet(Doc : IDocument, NetName : WideString, const APrimId : integer, NColour : TColor, WWidth :TSize) : boolean;
 var
@@ -369,17 +388,40 @@ begin
     Rpt := TStringList.Create;
     Rpt.Add('ColourNets');
 
-    Preferences := SchServer.Preferences;
+    Preferences := Schserver.Preferences;
     Units    := Preferences.DefaultDisplayUnit;
+    Units    := GetCurrentDocumentUnit;
+
     UnitsSys := Preferences.DefaultUnitSystem;
     UnitsSys := CurrentSch.UnitSystem;
+    UnitsSys := GetCurrentDocumentUnitSystem;
 
     NetList   := FetchNetsFromDoc(Doc);
 
 {    TSize = ( eZeroSize, eSmall, eMedium, eLarge }
 
+    SchServer.ProcessControl.PreProcess(CurrentSch, '');
+
+    WS := GetWorkSpace;
+    Prj := WS.DM_FocusedProject;
+    if Prj <> nil then
+    begin
+        Prj.DM_BeginUpdate;
+        Prj.DM_ClearAllNetColors;
+        Prj.DM_SetNetColorByName('VCC', StringToColor('clBlue') );
+//        Prj.DM_SetConnectedNetsColor('VCC', StringToColor('clRed') );
+        Prj.DM_EndUpdate;
+        RefreshSchSheetNetObjects(CurrentSch);
+    end;
+
     ColourNet(Doc, 'GND', eWire, StringToColor('clGreen'), eLarge);
     ColourNet(Doc, 'VDD', eWire, StringToColor('clRed'),   eLarge);
+
+// none of the following works to refresh display...
+    Doc.DM_Compile;
+    SchServer.ProcessControl.PostProcess(CurrentSch, '');
+    CurrentSch.GraphicallyInvalidate;
+    CurrentSch.UpdateDisplayForCurrentSheet;
 
     GenerateReport('ColourNets.txt', false);
 end;
@@ -422,8 +464,11 @@ Begin
 
     Preferences := Schserver.Preferences;
     Units    := Preferences.DefaultDisplayUnit;
+    Units    := GetCurrentDocumentUnit;
+
     UnitsSys := Preferences.DefaultUnitSystem;
     UnitsSys := CurrentSch.UnitSystem;
+    UnitsSys := GetCurrentDocumentUnitSystem;
 
     NetObjList := FindSelectedNetItems(Doc);
 
