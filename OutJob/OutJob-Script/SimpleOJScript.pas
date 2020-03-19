@@ -8,6 +8,9 @@
  Summary
      Example of OutJob script interaction.
      Supports the Configure Change & Generate functions of OutJob.
+
+     ONLY supports use of FIXED output filenames; NO container or type or parameter names.
+
      Change: supports Open & Add outputs to project & custom output paths & filename
      Configure: supports passing source document static/stored parameter thru' to Generate
      Main code block can be tested outside OutJob by using DirectCall()
@@ -23,6 +26,8 @@ Notes:
     Can test the form UI by removing (dummy : boolean) parameter & calling direct outside of OutJob.
     May or may not need the Script project to run outside of OutJob (which is in a project)
 
+    ONLY supports use of FIXED output filenames; NO container or type or parameter names.
+
 
 B.L. Miller
 21/08/2018  v0.1  intial
@@ -31,6 +36,7 @@ B.L. Miller
 18/07/2019  v0.4  Added Configure form
 18/03/2020  v0.41 Fix missing user parameter when Configure is not run (at least once) before Generate
 18/03/2020  v0.42 Attempt support for relative path ticked in Change.
+20/03/2020  v0.43 Add text to Summary & Notes.
 ..............................................................................}
 
 Interface    // not sure this is not just ignored in delphiscript.
