@@ -33,8 +33,8 @@ BL Miller
 15/03/2020  v0.11 File exists tested the wrong (outfile) file & check/create new paths
 18/03/2020  v0.12 Fix bug in generate (no source file parameter) if configure had never been run
                   Attempt support for relative path in Change.
-23/03/2020  v0.2 Use BOM output path to get input file for script. Support? fields.
-
+23/03/2020  v0.20 Use BOM output path to get input file for script. Support? fields.
+30/03/2020  v0.21 More protection for missing parameters in callback functions.
 }
 
 const
@@ -67,7 +67,7 @@ var
     PrjConfig    : IConfiguration;
     Doc           : IDocument;
     ServerDoc     : IServerDocument;
-    OutPutMan     : IOutPutManager;
+    OutPutMan     : IOutputManager;
     OJDoc         : TJobManagerDocument;   // IWSM_OutputJobDocument;
     OJob          : IOutputJob;
     Output        : IOutputer;
@@ -141,14 +141,17 @@ begin
     ParamList := TParameterList.Create;
     ParamList.ClearAllParameters;
     ParamList.SetState_FromString(Parameter);
+    TargetPrefix := '';
     Param := ParamList.GetState_ParameterByName('TargetPrefix');
-    TargetPrefix := Param.Value;
+    if Param <> nil then TargetPrefix := Param.Value;
+    TargetFolder := '';
     Param := ParamList.GetState_ParameterByName('TargetFolder');
-    TargetFolder := Param.Value;
+    if Param <> nil then TargetFolder := Param.Value;
+    TargetFN := '';
     Param := ParamList.GetState_ParameterByName('TargetFileName');
-    TargetFN := Param.Value;
-
+    if Param <> nil then TargetFN := Param.Value;
     Result := TargetFN;
+
     if TargetFN = '' then
     begin
         Result := cDefaultOutputFileName;
@@ -216,12 +219,16 @@ begin
     ParamList.ClearAllParameters;
     ParamList.SetState_FromString(Parameter);
 
-    Param := ParamList.GetState_ParameterByName('TargetFolder');
-    TargetFd := Param.Value;
-    Param := ParamList.GetState_ParameterByName('TargetFileName');     // output target name
-    TargetFN := Param.Value;
+    TargetPrefix := '';
     Param := ParamList.GetState_ParameterByName('TargetPrefix');
-    TargetPrefix := Param.Value;
+    if Param <> nil then TargetPrefix := Param.Value;
+
+    TargetFd := '';
+    Param := ParamList.GetState_ParameterByName('TargetFolder');
+    if Param <> nil then TargetFd := Param.Value;
+    TargetFN := '';                        // output target name
+    Param := ParamList.GetState_ParameterByName('TargetFileName');
+    if Param <> nil then TargetFN := Param.Value;
 
     SourceFN := cDefaultInputFileName;
     Param    := ParamList.GetState_ParameterByName(cSourceFileNameParameter);    // input target name from Configure()
@@ -239,7 +246,6 @@ begin
 
     Prj := GetWorkspace.DM_FocusedProject;
     Doc := GetWorkSpace.DM_FocusedDocument;
-
     if Doc.DM_DocumentKind <> cDocKind_OutputJob then exit;
     GetCurrentDocumentFileName;
     GetActiveServerName;
@@ -403,13 +409,12 @@ begin
 //   exit;
 
 // if TargetFd contains '.\' then is encoded as resolved relative path.
-    IsRelativePath( TargetFd);
+    IsRelativePath(TargetFd);       // dnw
 
     TargetFd := UnRelativePath(TargetFd);
     SourcePath := UnRelativePath(SourcePath);
 
-// very bad idea to link the input file to the same path as output (dynamic)
-// better to make this a project path.
+//  the input file (output of other outputer in container.
     CSV_Path := SourcePath + SourceFN;
 
 // 'Path of my new POS file with the right format and extension
@@ -497,7 +502,6 @@ begin
 
 end;
 
-
 procedure DumpOutJobReport();
 var
     Param        : TParameter;
@@ -544,15 +548,13 @@ begin
     ContainerSect :=  ParseTheOutJobFile(ServerDoc, cOJFHeadingPublish);
     ContainerSect.Count;
 
-//    OutputMan := GetWorkspace.DM_OutputManager;
-
     Rpt.Add('OJ Outputers ');
 
     for I := 0 to (OJDoc.OutputerCount - 1) do
     begin
         OutPut := OJDoc.Outputer(I);
 
-        POutput := Prj.DM_Outputers(OutPut.DM_ViewName);
+//        POutput := Prj.DM_Outputers(OutPut.DM_ViewName);
 //        POutput.DM_ViewName ;
 
                                                  // Output name                 'Script'                    'Script Output'
@@ -588,8 +590,10 @@ begin
         OJContainer.DM_GeneralField;
         VariantS := OJDoc.VariantScope;   // TOutputJobVariantScope;
 
-// this seems to make stuff                                             // TOutPutCategory
-//        PreDefinedOP := OutputMan.DM_GetPredefinedOutputForCategory(eOutput_Fabrication, I)   ;  // IPredefinedOutput
+// this seems to make stuff                                   // TOutPutCategory
+//                   eOutput_Documentation     eOutput_Report        eOutput_Fabrication
+//        PreDefinedOP := OutputMan.DM_GetPredefinedOutputForCategory(eOutput_Report, 1)   ;  // IPredefinedOutput
+// OutPutMan.DM_GetPredefinedOutputForCategory(TOutputCategory, Index :intger) : IPredefinedOutput
 //        IPredefinedOutput.DM_SetName;
 
         Rpt.Add('Container ' + IntToStr(I + 1) + ' ' + OJContainer.Name + ' ' + OJContainer.OutputPath + ' ' + OJContainer.TypeString);
