@@ -37,6 +37,7 @@ BL Miller
 30/03/2020  v0.21 More protection for missing parameters in callback functions.
 07/04/2020  v0.30 AD19 does not work same as AD17 wrt (object = nil) vs Assigned(object)
 07/04/2020  v0.31 Refactor TParameterList out for TStringList
+08/04/2020  v0.40 Use temporary file copy of initial BoM output to eliminate file locking problems.
 }
 
 const
@@ -147,7 +148,6 @@ begin
     ParamList.NameValueSeparator := '=';
     ParamList.DelimitedText := Parameter;
     ParamList.Count;
-    ParamList.Strings(0);
 
     TargetPrefix := '';
     I := ParamList.IndexOfName('TargetPrefix');
@@ -206,6 +206,7 @@ Function Generate(Parameter : String) : String;
 var
     InputFile      : TextFile;
     OutputFile     : TextFile;
+    ferror         : Integer;
     TargetFD       : WideString;
     TargetPrefix   : WideString;
     TargetFN       : WideString;     // script output file
@@ -215,6 +216,7 @@ var
     SourcePath     : WideString;
     CSV_Path     : WideString;
     POS_Path     : WideString;
+    tmpfile      : Widestring;
     tmpstr       : WideString;
     Document     : IDocument;
     ParamList    : TStringList;
@@ -238,7 +240,6 @@ begin
     ParamList.NameValueSeparator := '=';
     ParamList.DelimitedText := Parameter;
 
-
     TargetPrefix := '';
     I := ParamList.IndexOfName('TargetPrefix');
     if I > -1 then TargetPrefix := ParamList.ValueFromIndex(I);
@@ -259,7 +260,7 @@ begin
     OpenOutputs := false;
     I := ParamList.IndexOfName('OpenOutputs');
     if I > -1 then
-        OpenOutputs := Str2Bool(ParamList.ValueFromIndex(I), true);
+        Str2Bool(ParamList.ValueFromIndex(I), OpenOutputs);
 
     ParamList.Free;
     Rpt := TStringList.Create;
@@ -270,8 +271,8 @@ begin
 
     if bDebugfile then
     begin
-        Rpt.Add(Parameter);
         Rpt.Add(' Generate ');
+        Rpt.Add(  Parameter );
         Rpt.Add(' Running Script Prj ' + GetRunningScriptProjectName);
         Rpt.Add(' CurrentDocFN    ' + GetCurrentDocumentFileName);
         Rpt.Add(' Server          ' + GetActiveServerName);
@@ -447,16 +448,22 @@ begin
     end;
 
     bFSuccess := true;
-    if not DirectoryExists(RemoveSlash(TargetFd, '\'), false) then
-        bFSuccess := CreateDir(RemoveSlash(TargetFD, '\') );
+    if not DirectoryExists(RemoveSlash(TargetFd, cPathSeparator), false) then
+        bFSuccess := CreateDir(RemoveSlash(TargetFD, cPathSeparator) );
+//    if bFSuccess and FileExists(POS_Path, false) then
+//        bFSuccess := DeleteFile(POS_Path);
 
     if bFSuccess then
     begin
         AssignFile(OutputFile, POS_Path);
+//        FileMode := fmOpenReadWrite;
+// {$I-}
+//        Reset(OutputFile);
         Rewrite(OutputFile);
+// {$I+}
     end else
     begin
-        ShowMessage('File/path not found : ' + TargetFD + TargetFN);
+        ShowMessage('File/path not found : ' + POS_Path);
         exit;
     end;
 
@@ -471,8 +478,26 @@ begin
             exit;
         end;
     end;
-    AssignFile(InputFile, CSV_Path + SourceFNExt);
+
+//  temporary file copy of input BOM file to avoid "Open Outputs" locking.
+    tmpfile := SpecialFolder_Temporary + IntToStr(DateTimeToFileDate(Date)) + '.tmp';
+    CopyFile(CSV_Path + SourceFNExt, tmpfile, false);
+
+    AssignFile(InputFile, tmpfile);
+//    FileMode := fmOpenRead;
+// {$I-}
     Reset(InputFile);
+    ferror := 0;
+//    ferror := IOResult;       // not sure this works.
+{$I+}
+    if ferror <> 0 then
+    begin
+        bFSuccess := false;
+        CloseFile(OutputFile);
+        CloseFile(InputFile);
+        ShowMessage('File input problem, locked? : ' + CSV_Path);
+        Exit;
+    end;
 
     while not EOF(InputFile) do
     begin
@@ -504,8 +529,11 @@ begin
             Writeln(Outputfile, '');
 
     end;
+
     CloseFile(InputFile);
     CloseFile(OutputFile);
+    if FileExists(tmpfile, false) then
+        DeleteFile(tmpfile);
 
     Result := 'done';
 
