@@ -37,6 +37,7 @@ B.L. Miller
 18/03/2020  v0.41 Fix missing user parameter when Configure is not run (at least once) before Generate
 18/03/2020  v0.42 Attempt support for relative path ticked in Change.
 20/03/2020  v0.43 Add text to Summary & Notes.
+09/04/2020  v0.44 Change from fn to proc form of methods for ParameterList.
 ..............................................................................}
 
 Interface    // not sure this is not just ignored in delphiscript.
@@ -205,13 +206,13 @@ End;
 // seems to pass in focused PcbDoc filename.
 Function Configure(Parameter : String) : String;
 var
-    ParamList : TParameterList;
+    ParamList      : TParameterList;
     SourceFileName : WideString;
 
 begin
     ParamList := TParameterList.Create;
     ParamList.ClearAllParameters;
-//    ParamList.SetState_FromString(Parameter);
+    ParamList.SetState_FromString(Parameter);
 
     SourceFileName := PickSourceDoc(false);
     ParamList.SetState_AddOrReplaceParameter(cSourceFileNameParameter, SourceFileName, true);
@@ -224,20 +225,24 @@ end;
 Function PredictOutputFileNames(Parameter : String) : String;
 var
     ParamList    : TParameterList;
-    Param        : IParameter;
     bValue       : boolean;
     TargetFolder : WideString;
     TargetFN     : WideString;
+    TargetPrefix : WideString;
 
 begin
     // Parameter == TargetFolder=   TargetFileName=    TargetPrefix=   OpenOutputs=(boolean)   AddToProject=(boolean)
     ParamList := TParameterList.Create;
     ParamList.ClearAllParameters;
     ParamList.SetState_FromString(Parameter);
-    Param := ParamList.GetState_ParameterByName('TargetFolder');
-    TargetFolder := Param.Value;
-    Param := ParamList.GetState_ParameterByName('TargetFileName');
-    TargetFN := Param.Value;
+
+    TargetFolder := '';
+    ParamList.GetState_ParameterAsString('TargetFolder', TargetFolder);
+    TargetPrefix := '';
+    ParamList.GetState_ParameterAsString('TargetPrefix', TargetPrefix);
+    TargetFN := '';
+    ParamList.GetState_ParameterAsString('TargetFileName', TargetFN);
+
     ParamList.Destroy;
 
     if TargetFN = '' then TargetFN := cDefaultReportFileName;
@@ -249,10 +254,10 @@ Function Generate(Parameter : String) : String;
 // Parameter == TargetFolder=   TargetFileName=    TargetPrefix=   OpenOutputs=(boolean)   AddToProject=(boolean)
 var
     ParamList  : TParameterList;
-    Param      : IParameter;
     SourceFileName : WideString;
     TargetFolder   : WideString;
     TargetFN       : WideString;
+    TargetPrefix   : WideString;
     tmpstr         : WideString;
     I              : integer;
     AddToProject   : boolean;
@@ -262,19 +267,29 @@ begin
     ParamList := TParameterList.Create;
     ParamList.ClearAllParameters;
     ParamList.SetState_FromString(Parameter);
-    Param := ParamList.GetState_ParameterByName('TargetFolder');
-    TargetFolder := Param.Value;
-    Param := ParamList.GetState_ParameterByName('TargetFileName');
-    TargetFN := Param.Value;
-    Param := ParamList.GetState_ParameterByName('TargetPrefix');
-    Param.Value;
-    ParamList.GetState_ParameterAsBoolean('OpenOutputs', OpenOutputs);
-    ParamList.GetState_ParameterAsBoolean('AddToProject', AddToProject);
-    Param := ParamList.GetState_ParameterByName(cSourceFileNameParameter);
-    if Param = nil then
-        ParamList.SetState_AddOrReplaceParameter(cSourceFileNameParameter, cSourceFileName, true)
-    else
-        SourceFileName := Param.Value;
+
+    TargetFolder := '';
+    ParamList.GetState_ParameterAsString('TargetFolder', TargetFolder);
+    TargetFN := '';
+    ParamList.GetState_ParameterAsString('TargetFileName', TargetFN);
+
+    TargetPrefix := '';
+    ParamList.GetState_ParameterAsString('TargetPrefix', TargetPrefix);
+
+    OpenOutputs := false;
+    tmpstr := 'false';
+    ParamList.GetState_ParameterAsString('OpenOutputs', tmpstr);
+    Str2Bool(tmpstr, OpenOutputs);
+
+    AddToProject := false;
+    tmpstr := 'false';
+    ParamList.GetState_ParameterAsString('AddToProject', tmpstr);
+    Str2Bool(tmpstr, AddToProject);
+
+    ParamList.GetState_ParameterAsString(cSourceFileNameParameter, SourceFileName);
+    if SourceFileName = '' then
+        ParamList.SetState_AddOrReplaceParameter(cSourceFileNameParameter, cSourceFileName, true);
+
     ParamList.Destroy;
 
     if TargetFolder = '' then
