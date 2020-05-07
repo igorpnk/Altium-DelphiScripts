@@ -15,10 +15,15 @@ B.L. Miller
 26/08/2019 v0.32 Added all associated Nets to Scoped Objects.
 25/09/2019 v0.33 Allow for multiple Rules of same rulekind
 10/10/2029 v0.34 Add green DRC dots to terminating pads without duplicating violations
+07/05/2020 v0.35 Add net names & allow pad regions in report.
 
 Displays yellow parallel bars for broken Nets & green DRC dots on pad ends of Nets
 
 }
+TConnectionMode      = ( eRatsNestConnection
+                         eBrokenNetMarker
+                       );
+
 const
     RuleToRunRC  = eRule_BrokenNets;     // only one tested/attempted.
     RuleToReport = eRule_BrokenNets;
@@ -27,6 +32,8 @@ const
 
 var
     Board     : IPCB_Board;
+    FileName  : TPCB_String;
+    Document  : IServerDocument;
     Rpt       : TStringList;
     dlgResult : boolean;   // integer for cancel version FFS
 
@@ -103,7 +110,7 @@ begin
     else Result := '';
     End;
 End;
-
+         eRule_
 function GetMatchingRulesFromBoard (const RuleKind : TRuleKind) : TObjectList;
 var
     Iterator : IPCB_BoardIterator;
@@ -189,6 +196,7 @@ var
     Violation   : IPCB_Violation;
     ViolDesc    : WideString;
     ViolName    : WideString;
+    NetName1    : WideString;
     txt         : WideString;
     I, J          : integer;
     VCount        : integer;
@@ -205,11 +213,15 @@ begin
         Prim2 := Prim;
         Redos := 1;
         repeat
+            NetName1 := 'NoNet';
             Violation := nil;
-            if Rule.CheckUnaryScope (Prim2) then
-                Violation := Rule.ActualCheck (Prim2, nil);
+            if Rule.CheckUnaryScope (Prim) then
+                Violation := Rule.ActualCheck (Prim, nil);
             if Violation <> nil then
             begin
+                if Prim.InNet then NetName1 := Prim.Net.Name;
+                if (Prim.ObjectId = eNetObject) then NetName1 := Prim.Name;
+
 // want to DRC error mark each Net pad end but not make extra violations.
                 if Prim = Prim2 then
                 begin
@@ -221,7 +233,7 @@ begin
                     ViolDesc := Copy(ViolDesc, 0, 60);
                     ViolDesc := PadRight(ViolDesc, 60);
                     ViolName := Violation.Name;
-                    Rpt.Add('U ' + IntToStr(VCount) + ' ' + PadRight(Prim2.ObjectIDString, 15) + '            ' + PadRight(ViolName, 20) + ' '
+                    Rpt.Add('U ' + IntToStr(VCount) + ' ' + PadRight(Prim2.ObjectIDString, 15) + PadRight(NetName1, 20) + '            ' + PadRight(ViolName, 20) + ' '
                             + ViolDesc + '   ' + Rule.Name + ' ' + RuleKindToString(RuleKind));
                 end;
                 Prim.SetState_DRCError(true);
@@ -254,6 +266,8 @@ var
     RuleKind    : TRuleKind;
     Prim, Prim2 : IPCB_Primitive;
     Violation   : IPCB_Violation;
+    NetName1    : WideString;
+    NetName2    : WideString;
     I, J        : integer;
     VCount      : integer;
 
@@ -263,10 +277,19 @@ begin
 
     for I := 0 to (Scope1List.Count - 1) do
     begin
+        NetName1 := 'NoNet';
+        NetName2 := 'NoNet';
         Prim := Scope1List.Items[I];
+        if Prim.InNet then NetName1 := Prim.Net.Name;
+        if (Prim.ObjectId = eNetObject) then NetName1 := Prim.Name;
+
         for J := 0 to (Scope2List.Count - 1) do
         begin
             Prim2 := Scope2List.Items[J];
+            if Prim2.InNet then NetName2 := Prim2.Net.Name;
+            if (Prim2.ObjectId = eNetObject) then NetName2 := Prim2.Name;
+            NetName2 := NetName1 + '<->' + NetName2;
+
             // Rule := Board.FindDominantRuleForObjectPair(Prim1, Prim2, RuleKind);
             Violation := nil;
             if Rule.CheckBinaryScope (Prim, Prim2) then
@@ -289,20 +312,20 @@ begin
     Rpt.Add(' Total Binary Rule Violation Count : ' + IntToStr(VCount));
 end;
 
-procedure DRCReporter(Rpt : TStringList);
+procedure DRCReporter(Objects : TObjectSet, RuleKind : integer, Rpt : TStringList);
 var
     Iterator  : IPCB_BoardIterator;
     Violation : IPCB_Violation;
     ViolDesc  : WideString;
     ViolName  : WideString;
     VioRptTxt : WideString;
+    NetName1  : WideString;
+    NetName2  : WideString;
     Rule      : IPCB_Rule;
     PCBObj1   : IPCB_Primitive;
     PCBObj2   : IPCB_Primitive;
     Pad       : IPCB_Pad;
     PinDesc   : WideString;
-    FileName  : TPCB_String;
-    Document  : IServerDocument;
     VCount    : integer;
 
 begin
@@ -315,7 +338,7 @@ begin
     Iterator.AddFilter_LayerSet(AllLayers);
     Iterator.AddFilter_Method(eProcessAll);
 
-    Rpt.Add('cnt  Obj1 Pad:         Obj2 Pad:          Violation Descripton  &  Name:      Rule Name:   RuleType: ');
+    Rpt.Add('cnt  Obj1 Pad:           Obj2 Pad:            NetName:              Violation Descripton  &  Name:      Rule Name:   RuleType: ');
 
     Violation := Iterator.FirstPCBObject;
     While Violation <> Nil Do
@@ -325,40 +348,59 @@ begin
 
         PCBObj1 := Violation.Primitive1;
         PCBObj2 := Violation.Primitive2;
+        NetName1 := 'NoNet';
+        NetName2 := NetName1;
         VioRptTxt := '';
+
+// same net for both objects of UnRoute.
 
         if Rule <> Nil then
         begin
-            if Rule.ObjectID = RuleToReport then
+            if (Rule.ObjectID = RuleKind) or (RuleKind = -1)then
             begin
-               if PCBObj1.ObjectID = ePadObject then
+                PinDesc := '';
+                if PCBObj1 <> Nil then
                 begin
                     inc(VCount);
-                    Pad := PCBObj1;
-                    PinDesc := Pad.PinDescriptor;
-                    VioRptTxt := PadRight(IntToStr(VCount), 3) + ' ' + PadRight(PinDesc, 20) + ' ';
+                    if PCBObj1.InNet then NetName1 := PCBObj1.Net.Name;
+                    if (PCBObj1.ObjectId = eNetObject) then NetName1 := PCBObj1.Name;
+
+                    if PCBObj1.ObjectID = ePadObject then
+                    begin
+                       Pad := PCBObj1;
+                       PinDesc := Pad.PinDescriptor;
+                    end;
                 end;
+                VioRptTxt := PadRight(IntToStr(VCount), 3) + ' ' + PadRight(PinDesc, 20) + ' ';
 
                 if PCBObj2 <> Nil then
                 begin
+                    PinDesc := '';
+                    if PCBObj2.InNet then NetName2 := PCBObj2.Net.Name;
+                    if (PCBObj2.ObjectId = eNetObject) then NetName2 := PCBObj2.Name;
+                    NetName2 := NetName1 + '<->' + NetName2;
+
                     if PCBObj2.ObjectID = ePadObject then
                     begin
                         // inc(VCount);
                         Pad := PCBObj2;
                         PinDesc := Pad.PinDescriptor;
-                        If VioRptTxt = '' then
-                            VioRptTxt := PadRight(IntToStr(VCount), 3) + ' ' + PadRight(PinDesc, 20) + '            '
-                        else
-                            VioRptTxt := VioRptTxt + PadRight(PinDesc, 20) + ' ';
                     end;
-                end;
+                    If VioRptTxt = '' then
+                        VioRptTxt := PadRight(IntToStr(VCount), 3) + ' ' + PadRight(PinDesc, 20) + ' '
+                    else
+                        VioRptTxt := VioRptTxt + PadRight(PinDesc, 20) + ' ';
+                end
+                else
+                     VioRptTxt := VioRptTxt + '                     ';
+
                 if VioRptTxt <> '' then
                 begin
                     ViolDesc := Violation.Description;
                     ViolDesc := Copy(ViolDesc, 0, 60);
                     ViolDesc := PadRight(ViolDesc, 60);
                     ViolName := Violation.Name;
-                    VioRptTxt := VioRptTxt + PadRight(ViolName, 20) + ' ' + ViolDesc + '  ' + Rule.Name + '  ' + RuleKindToString(Rule.RuleKind);
+                    VioRptTxt := VioRptTxt + ' ' + PadRight(NetName2, 20) + ' ' + PadRight(ViolName, 20) + ' ' + ViolDesc + '  ' + Rule.Name + '  ' + RuleKindToString(Rule.RuleKind);
                     Rpt.Add(VioRptTxt);
                 end;
             end;
@@ -389,23 +431,6 @@ begin
         Pad := Iterator.NextPCBObject;
     end;
     Board.BoardIterator_Destroy(Iterator);
-
-    Rpt.Insert(0,'Violation & NoNet Pad Information for ' + ExtractFileName(Board.FileName) + ' document.');
-    Rpt.Insert(1,'----------------------------------------------------------');
-    Rpt.Insert(2,'');
-
-    // Display the Rules report
-    FileName := ExtractFilePath(Board.FileName) + ChangefileExt(ExtractFileName(Board.FileName),'') + '-ViolationsReport.txt';
-    Rpt.SaveToFile(Filename);
-    Rpt.Free;
-
-    Document  := Client.OpenDocument('Text', FileName);
-    If Document <> Nil Then
-    begin
-        Client.ShowDocument(Document);
-        if (Document.GetIsShown <> 0 ) then
-            Document.DoFileLoad;
-    end;
 end;
 
 procedure DRCViolateNoRoute;
@@ -444,7 +469,7 @@ begin
 //        Rule.DRCEnabled;
 //        Rule := Board.FindDominantRuleForObject(Prim, RuleKind);
 
-        if not Rule.IsUnary then       // Rule.Scope2Expression <> '' 
+        if not Rule.IsUnary then       // Rule.Scope2Expression <> ''
             Scope2List := GetScopedObjects(Rule, 2);
 
         if Rule.IsUnary then
@@ -457,10 +482,28 @@ begin
     Board.ViewManager_FullUpdate;
 
     RulesList.Destroy;
-    DRCReporter(Rpt);
-    EndHourGlass;
+//                   objects       rulekind
+    DRCReporter(MkSet(ePadObject), RuleToReport, Rpt);
 
+    EndHourGlass;
     Client.SendMessage('PCB:Zoom', 'Action=Redraw' , 255, Client.CurrentView);
+
+    Rpt.Insert(0,'Violation & NoNet Pad Information for ' + ExtractFileName(Board.FileName) + ' document.');
+    Rpt.Insert(1,'----------------------------------------------------------');
+    Rpt.Insert(2,'');
+
+    // Display the Rules report
+    FileName := ExtractFilePath(Board.FileName) + ChangefileExt(ExtractFileName(Board.FileName),'') + '-UnRoute-NoNet-Violations.txt';
+    Rpt.SaveToFile(Filename);
+    Rpt.Free;
+
+    Document  := Client.OpenDocument('Text', FileName);
+    If Document <> Nil Then
+    begin
+        Client.ShowDocument(Document);
+        if (Document.GetIsShown <> 0 ) then
+            Document.DoFileLoad;
+    end;
 end;
 
 //wrapper to call DRCReporter
@@ -469,7 +512,23 @@ begin
     Board := PCBServer.GetCurrentPCBBoard;
     If Board = Nil Then Exit;
     Rpt := TStringList.Create;
-    DRCReporter(Rpt);
+    DRCReporter(AllObjects, cAllRules, Rpt);
+    Rpt.Insert(0,'Violation for All objects & All rules for ' + ExtractFileName(Board.FileName) + ' document.');
+    Rpt.Insert(1,'----------------------------------------------------------');
+    Rpt.Insert(2,'');
+
+    // Display the Rules report
+    FileName := ExtractFilePath(Board.FileName) + ChangefileExt(ExtractFileName(Board.FileName),'') + '-All-Violations.txt';
+    Rpt.SaveToFile(Filename);
+    Rpt.Free;
+
+    Document  := Client.OpenDocument('Text', FileName);
+    If Document <> Nil Then
+    begin
+        Client.ShowDocument(Document);
+        if (Document.GetIsShown <> 0 ) then
+            Document.DoFileLoad;
+    end;
 end;
 
 
