@@ -1,8 +1,16 @@
-{ FootPrintPadReport.pas
+{ FootPrintReport.pas
 
+was FootPrintPadReport.pas
  from GeometryHeight..
  from General\TextFileConvert.pas
  from Footprint-SS-Fix.pas 16/09/2017
+
+ReportPadHole()
+    Pad copper shapes stacks, hole & masks
+  and
+ReportLayersUsed()
+    FP primitive obj totals & mech layer summary table.
+    FP copper layers are reported by the highest Pad padstack Mode.
 
  13/09/2019  BLM  v0.1  Cut&paste out of Footprint-SS-Fix.pas
  13/09/2019  BLM  v0.11 Holetype was converted as boolean..
@@ -10,23 +18,29 @@
 28/09/2019   BLM  v0.13 Add footprint/board origin
 29/09/2019   BLM  v0.14 Add tests for origin & bounding rectangle CoG.
 30/09/2019   BLM  v0.15 Seems lots of info BR & desc was not valid until after some setup
+04/05/2020   BLM  v0.16 Add layers used report.
 
 note: First 4 or 5 statements run in loop seem to prevent false stale info
+
+reports layer by exception if layer > cFullMechLayerReport const.
 
 }
 //...................................................................................
 const
-    Units      = eMetric; //eImperial;
-    XOExpected = 50000;   // expected X origin mil
-    YOExpected = 50000;   // mil
+    Units          = eMetric; //eImperial;
+    XOExpected     = 50000;   // expected X origin mil
+    YOExpected     = 50000;   // mil
+    cMaxMechLayer        = 1000;
+    cFullMechLayerReport = 32;
 
 Var
     CurrentLib : IPCB_Library;
     FPIterator : IPCB_LibraryIterator;
     Iterator   : IPCB_GroupIterator;
-    Handle     : IPCB_Primitive;
-    Rpt        : TStringList;
-    FilePath   : WideString;
+    Prim       : IPCB_Primitive;
+    Footprint   : IPCB_LibComponent;
+    Rpt         : TStringList;
+    FilePath    : WideString;
 
 procedure SaveReportLog(FileExt : WideString, const display : boolean);
 var
@@ -62,11 +76,187 @@ begin
 end;
 {..................................................................................................}
 
+function LayerToIndex(L : TLayer) : integer;
+var
+   I : integer;
+begin
+    Result := 0;
+    I := 1;
+    repeat
+        if LayerUtils.MechanicalLayer(I) = L then Result := I;
+        inc(I);
+        if I >  cMaxMechLayer then break;
+    until Result <> 0;
+end;
+
+procedure ReportLayersUsed;
+var
+    LayerUsed   : Array [0..1001]; // of boolean;
+    LayerPCount : Array [0..1001]; // of integer;
+    LayerIsUsed : boolean;
+    NoOfPrims : Integer;
+    PadStack  : WideString;
+    PadCount  : Integer;
+    RegCount  : Integer;
+    TrkCount  : Integer;
+    TxtCount  : Integer;
+    FilCount  : integer;
+    LayerRow  : WideString;
+    Layer     : TLayer;
+    I, J      : integer;
+    sLayer    : WideString;
+    FPName    : WideString;
+    HoleSet   : TSet;
+
+begin
+    CurrentLib := PCBServer.GetCurrentPCBLibrary;
+    If CurrentLib = Nil Then
+    Begin
+        ShowMessage('This is not a PcbLib document');
+        Exit;
+    End;
+
+    BeginHourGlass(crHourGlass);
+//    Units := eImperial;
+
+    // For each page of library is a footprint
+    FPIterator := CurrentLib.LibraryIterator_Create;
+    FPIterator.SetState_FilterAll;
+    FPIterator.AddFilter_LayerSet(AllLayers);
+
+    Rpt := TStringList.Create;
+    Rpt.Add(ExtractFileName(CurrentLib.Board.FileName));
+    Rpt.Add('');
+    Rpt.Add('');
+    Rpt.Add('');
+    Rpt.Add('FootPrint                           PadStack| Primitive Counts  | Mechanical Layers                                                                                                              | 33 + ');
+    Rpt.Add('Name                                    |PS |Pad|Reg|Trk|Txt|Fil| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10| 11| 12| 13| 14| 15| 16| 17| 18| 19| 20| 21| 22| 23| 24| 25| 26| 27| 28| 29| 30| 31| 32|...');
+    Rpt.Add('');
+
+    HoleSet := MkSet(ePadObject, eViaObject);
+    for I := 0 to 1001 do
+        LayerUsed[I] := 0;
+
+    Footprint := FPIterator.FirstPCBObject;
+    while Footprint <> Nil Do
+    begin
+// one of the next 4 or 5 lines seems to fix the erronous bounding rect of the alphabetic first item in Lib list
+// suspect it changes the Pad.Desc text as well
+
+//        CurrentLib.SetBoardToComponentByName(Footprint.Name) ;   // fn returns boolean
+        CurrentLib.SetState_CurrentComponent (Footprint);
+
+        CurrentLib.Board.ViewManager_FullUpdate;                // makes a slideshow
+//        Client.SendMessage('PCB:Zoom', 'Action=Redraw' , 255, Client.CurrentView);
+        CurrentLib.Board.GraphicalView_ZoomRedraw;
+//        CurrentLib.Board.Viewport.ViewportRect (FootPrint.BoundingRectangleForPainting);
+        CurrentLib.RefreshView;
+
+//        LayerIsUsed := FootPrint.LayerUsed(TV6_Layer);
+//        FootPrint.GetState_LayersUsedArray;
+
+// electrical layers
+        TrkCount := Footprint.GetPrimitiveCount(MkSet(eTrackObject, eArcObject));
+        TxtCount := Footprint.GetPrimitiveCount(MkSet(eTextObject));
+        RegCount := Footprint.GetPrimitiveCount(MkSet(eRegionObject));
+        FilCount := Footprint.GetPrimitiveCount(MkSet(eFillObject));
+        PadCount := Footprint.GetPrimitiveCount(MkSet(ePadObject));
+
+        PadStack := '';
+        for I := 1 to (PadCount) do        // one's based
+        begin
+            Prim := FootPrint.GetPrimitiveAt(I, ePadObject);
+            if Prim <> nil then
+            begin
+                Case Prim.Mode of
+                ePadMode_Simple        : PadStack := PadStack + 'S';
+                ePadMode_LocalStack    : PadStack := PadStack + 'L';
+                ePadMode_ExternalStack : PadStack := PadStack + 'X';
+                end;
+            end;
+        end;
+
+        if ansipos('X', PadStack) > 0 then PadStack := 'X';   // external full stack
+        if ansipos('L', PadStack) > 0 then PadStack := 'L';   // local stack
+        if ansipos('S', PadStack) > 0 then PadStack := 'S';
+
+        FPName := Footprint.Name;
+//        Setlength(FPName, 29);
+
+// mechanical layers
+
+        Iterator := Footprint.GroupIterator_Create;
+        Iterator.AddFilter_ObjectSet(AllObjects);  //  MkSet(ePadObject, eViaObject));
+
+        NoOfPrims := 0;
+        for I := 0 to 1001 do
+            LayerPCount[I] := 0;
+
+        Prim := Iterator.FirstPCBObject;
+        while (Prim <> Nil) Do
+        begin
+            Inc(NoOfPrims);
+
+//            if LayerUtils.IsElectricalLayer(Prim.Layer) then Copper= true;
+
+            I := -1;
+            if  LayerUtils.IsMechanicalLayer(Prim.Layer) then
+                I := LayerToIndex(Prim.Layer);
+
+            if (I <> -1) and (not InSet(Prim.ObjectId, HoleSet) ) then
+            begin
+                if I = 0 then
+                begin      // oddball objects..
+                    LayerUsed[1001]   := 1;
+                    LayerPCount[1001] := LayerPCount[1001] + 1;
+                end else
+                begin
+                    LayerUsed[I]   := 1;
+                    LayerPCount[I] := LayerPCount[I] + 1;
+                end;
+            end;
+            Prim := Iterator.NextPCBObject;
+        end;
+
+        LayerRow := '';
+        for I := 1 to (cMaxMechLayer + 1) do
+        begin
+            if I <= cFullMechLayerReport then
+            begin
+               LayerRow := LayerRow + PadLeft(IntToStr(LayerPCount[I]), 3) + '|';
+            end else
+            begin
+                if (LayerPCount[I] > 0) and (LayerUsed[I] > 0) then
+                    LayerRow := LayerRow + IntToStr(I) + '=' + IntToStr(LayerPCount[I]) + '|';
+            end;
+        end;
+
+        Rpt.Add(PadRight(FPName,40) + '| ' + PadStack + ' |' + PadLeft(IntToStr(PadCount),3) + '|' + PadLeft(IntToStr(RegCount),3) + '|'
+                + PadLeft(IntToStr(TrkCount),3) + '|' +  PadLeft(IntToStr(TxtCount),3) + '|' + PadLeft(IntToStr(FilCount),3) + '|'
+                +LayerRow);
+
+        Footprint.GroupIterator_Destroy(Iterator);
+        Footprint := FPIterator.NextPCBObject;
+    end;
+
+    CurrentLib.LibraryIterator_Destroy(FPIterator);
+
+    CurrentLib.Navigate_FirstComponent;
+    CurrentLib.Board.GraphicalView_ZoomRedraw;
+    CurrentLib.RefreshView;
+
+    EndHourGlass;
+    SaveReportLog('LayersUsedReport.txt', true);
+    Rpt.Free;
+end;
+
 procedure ReportPadHole;
 var
-    Footprint    : IPCB_LibComponent;
+    
     Pad          : IPCB_Pad;
     PadCache     : TPadCache;
+    PlanesArray  : TPlanesConnectArray;
+    CPL          : WideString;
     Layer        : TLayer;
     NoOfPrims    : Integer;
     BR           : TCoordRect;
@@ -75,7 +265,7 @@ var
     BWOrigin     : TCoordPoint;
     TestPoint    : TPoint;
     BadFPList    : TStringList;
-    I            : integer;
+    I, L         : integer;
 //    Units        : TUnit;
 
 begin
@@ -120,8 +310,8 @@ begin
         BOrigin  := Point(CurrentLib.Board.XOrigin,      CurrentLib.Board.YOrigin     );  // abs Tcoord
         BWOrigin := Point(CurrentLib.Board.WorldXOrigin, CurrentLib.Board.WorldYOrigin);
 
-        BR    := Footprint.BoundingRectangle;                  // always zero!!  abs origin TCoord
-        BR    := Footprint.BoundingRectangleChildren;          // abs origin TCoord
+        BR := Footprint.BoundingRectangle;                  // always zero!!  abs origin TCoord
+        BR := Footprint.BoundingRectangleChildren;          // abs origin TCoord
         BR := RectToCoordRect(                         // relative to origin TCoord
               // Rect((BR.x1), (BR.y2), (BR.x2), (BR.y1)) );
               Rect((BR.x1 - BORigin.X), (BR.y2 - BOrigin.Y), (BR.x2 - BOrigin.X), (BR.y1 - BOrigin.Y)) );
@@ -140,19 +330,17 @@ begin
         if (abs(FPCoG.X) > MilsToRealCoord(200)) or (abs(FPCoG.Y) > MilsToRealCoord(200))then
             BadFPList.Add('possible bounding rect. offset ' + Footprint.Name);
 
- 
-
 // bits of footprint
         Iterator := Footprint.GroupIterator_Create;
         Iterator.AddFilter_ObjectSet(MkSet(ePadObject, eViaObject));
 
         NoOfPrims := 0;
 
-        Handle := Iterator.FirstPCBObject;
-        while (Handle <> Nil) Do
+        Prim := Iterator.FirstPCBObject;
+        while (Prim <> Nil) Do
         begin
             Inc(NoOfPrims);
-            if Handle.GetState_ObjectId = ePadObject then
+            if Prim.GetState_ObjectId = ePadObject then
             begin
                 Pad := Handle;
                 Layer := Pad.Layer;
@@ -191,9 +379,9 @@ begin
 
             end;
 
-            if (Handle.GetState_ObjectId = ePadObject) then
+            if (Prim.GetState_ObjectId = ePadObject) then
             begin
-                Pad := Handle;
+                Pad := Prim;
                 PadCache := Pad.Cache;
 
                 Rpt.Add('Pad Cache Robot Flag               : ' + BoolToStr(Pad.PadCacheRobotFlag, true)  + '  (' + IntToStr(Pad.PadCacheRobotFlag) + ')');
@@ -204,34 +392,29 @@ begin
                 Rpt.Add('Plane Connection Style        CCS  : ' + GetPlaneConnectionStyle(PadCache.PlaneConnectionStyle) );
                 Rpt.Add('Plane Connect Style for Layer      : ' + GetPlaneConnectionStyle(Pad.PlaneConnectionStyleForLayer(Layer)) );
                                                          
-(*
+
         // Transfer Pad.Cache's Planes field (Word type) to the Planes variable (TPlanesConnectArray type).
-        PlanesArray := PadCache.Planes;
-        // Calculate the decimal value of the 'CPL' number.
-        CPL := 0;
-        For L := kMaxInternalPlane DownTo kMinInternalPlane Do
-        Begin
+                PlanesArray := PadCache.Planes;
+                CPL := '';
+                for L := kMinInternalPlane To kMaxInternalPlane Do
+                begin
             // Planes is a TPlanesConnectArray and each internal plane has a boolean value.
             // at the moment PlanesArray[L] is always true which is not TRUE!
-            If (PlanesArray[L] = True) Then
-                CPL := (2 * CPL) + 1
-            Else
-                CPL := 2 * CPL;
-        End;
+                if (PlanesArray[L] = True) Then
+                    CPL := CPL + '1'
+                else
+                    CPL := CPL + '0';
+                end;
+//        CPL_Hex := IntegerToHexString(CPL);
 
-        // Calculate the hexadecimal value of the 'CPL' number.
-        CPL_Hex := IntegerToHexString(CPL);
-        If (PadCache.PlanesValid <> eCacheInvalid) Then
-        Begin
-            LS := LS + #13 +   'Power Planes Connection Code (Decimal): ' + IntToStr(CPL);
-            LS := LS + #13 +   'Power Planes Connection Code (Base 16): ' + CPL_Hex;
-        End
-        Else
-        Begin
-            LS := LS + #13 + '{ Power Planes Connection Code (Decimal): ' + IntToStr(CPL) + ' }';
-            LS := LS + #13 + '{ Power Planes Connection Code (Base 16): ' + CPL_Hex + ' }';
-        End;
-*)
+                if (PadCache.PlanesValid <> eCacheInvalid) Then
+                begin
+                    Rpt.Add('   Power Planes Connection Code (binary): ' + CPL );
+                end else
+                begin
+                    Rpt.Add('   { Power Planes Connection Code (binary): ' + CPL + ' }');
+                end;
+
 
 //     CCWV - Relief Conductor Width valid ?
                 Rpt.Add('Relief Conductor Width Valid  CCWV : ' + GetCacheState(PadCache.ReliefConductorWidthValid) );
@@ -266,7 +449,7 @@ begin
 //                Rpt.Add('SMEX : ' + CoordUnitToString(PadCache.SolderMaskExpansion, Units) );
             end;
 
-            Handle := Iterator.NextPCBObject;
+            Prim := Iterator.NextPCBObject;
         end;
 
         Rpt.Add('Num Pads+Vias : ' + IntToStr(NoOfPrims));
