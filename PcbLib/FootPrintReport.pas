@@ -19,10 +19,17 @@ ReportLayersUsed()
 29/09/2019   BLM  v0.14 Add tests for origin & bounding rectangle CoG.
 30/09/2019   BLM  v0.15 Seems lots of info BR & desc was not valid until after some setup
 04/05/2020   BLM  v0.16 Add layers used report.
+07/05/2020        v0.17 use ParameterList to (big!) speed up layer indexing.
+08/05/2020        v0.18 list mech pairs by index , tested in AD19
 
 note: First 4 or 5 statements run in loop seem to prevent false stale info
 
 reports layer by exception if layer > cFullMechLayerReport const.
+
+PadStack Mode:
+X == Full External stack
+L == Local stack
+S == Simple stack
 
 }
 //...................................................................................
@@ -30,17 +37,33 @@ const
     Units          = eMetric; //eImperial;
     XOExpected     = 50000;   // expected X origin mil
     YOExpected     = 50000;   // mil
-    cMaxMechLayer        = 1000;
+
     cFullMechLayerReport = 32;
 
+    AD19VersionMajor  = 19;
+    AD17MaxMechLayers = 32;       // scripting API has broken consts from TV6_Layer
+    AD19MaxMechLayers = 1024;
+    NoMechLayerKind   = 0;        // enum const does not exist for AD17/18
+
 Var
-    CurrentLib : IPCB_Library;
-    FPIterator : IPCB_LibraryIterator;
-    Iterator   : IPCB_GroupIterator;
-    Prim       : IPCB_Primitive;
-    Footprint   : IPCB_LibComponent;
-    Rpt         : TStringList;
-    FilePath    : WideString;
+    CurrentLib    : IPCB_Library;
+    FPIterator    : IPCB_LibraryIterator;
+    Iterator      : IPCB_GroupIterator;
+    Prim          : IPCB_Primitive;
+    Footprint     : IPCB_LibComponent;
+    Rpt           : TStringList;
+    FilePath      : WideString;
+    MaxMechLayer  : integer;
+    VerMajor      : WideString;
+
+
+function Version(const dummy : boolean) : TStringList;
+begin
+    Result               := TStringList.Create;
+    Result.Delimiter     := '.';
+    Result.Duplicates    := dupAccept;
+    Result.DelimitedText := Client.GetProductVersion;
+end;
 
 procedure SaveReportLog(FileExt : WideString, const display : boolean);
 var
@@ -76,25 +99,35 @@ begin
 end;
 {..................................................................................................}
 
-function LayerToIndex(L : TLayer) : integer;
+function LayerToIndex(var PL : TParameterList, const L : TLayer) : integer;
 var
-   I : integer;
+   I    : integer;
+   PVal : integer;
 begin
     Result := 0;
-    I := 1;
-    repeat
-        if LayerUtils.MechanicalLayer(I) = L then Result := I;
-        inc(I);
-        if I >  cMaxMechLayer then break;
-    until Result <> 0;
+// cache results to speed layer to index conversion
+    if not PL.GetState_ParameterAsInteger(L, PVal) then
+    begin
+        I := 1;
+        repeat
+            if LayerUtils.MechanicalLayer(I) = L then Result := I;
+            inc(I);
+            if I >  MaxMechLayer then break;
+        until Result <> 0;
+        PVal := Result;
+        PL.SetState_AddParameterAsInteger(L, PVal);
+    end
+    else
+        Result := PVal;
 end;
 
 procedure ReportLayersUsed;
 var
-    LayerUsed   : Array [0..1001]; // of boolean;
-    LayerPCount : Array [0..1001]; // of integer;
-    LayerIsUsed : boolean;
-    NoOfPrims : Integer;
+    LayerUsed    : Array [0..1025]; // of boolean;
+    LayerPCount  : Array [0..1025]; // of integer;
+    LayerIsUsed  : boolean;
+    plLayerIndex : TParameterList;
+    NoOfPrims    : Integer;
     PadStack  : WideString;
     PadCount  : Integer;
     RegCount  : Integer;
@@ -107,6 +140,11 @@ var
     sLayer    : WideString;
     FPName    : WideString;
     HoleSet   : TSet;
+    LayerStack    : IPCB_LayerStack_V7;
+    MechLayer     : IPCB_MechanicalLayer;
+    MechPairs     : IPCB_MechanicalLayerPairs;
+    MechLayerKind : TMechanicalLayerKind;
+    ML1, ML2      : integer;
 
 begin
     CurrentLib := PCBServer.GetCurrentPCBLibrary;
@@ -119,6 +157,17 @@ begin
     BeginHourGlass(crHourGlass);
 //    Units := eImperial;
 
+    VerMajor := Version(true).Strings(0);
+    MaxMechLayer := AD17MaxMechLayers;
+//    LegacyMLS     := true;
+    MechLayerKind := NoMechLayerKind;
+    if (VerMajor >= AD19VersionMajor) then
+    begin
+//        LegacyMLS     := false;
+        MaxMechLayer := AD19MaxMechLayers;
+    end;
+
+
     // For each page of library is a footprint
     FPIterator := CurrentLib.LibraryIterator_Create;
     FPIterator.SetState_FilterAll;
@@ -127,25 +176,70 @@ begin
     Rpt := TStringList.Create;
     Rpt.Add(ExtractFileName(CurrentLib.Board.FileName));
     Rpt.Add('');
+
+    plLayerIndex := TParameterList.Create;
+
+    for I := 0 to 1001 do
+        LayerUsed[I]   := 0;
+
+// assume same layerstack & mech pairs for whole library
+// proper method has broken function return type so iterate.
+    LayerStack := CurrentLib.Board.LayerStack_V7;
+    MechPairs  := CurrentLib.Board.MechanicalPairs;
+    for I := 1 to (MaxMechLayer - 1) do
+    begin
+        ML1 := LayerUtils.MechanicalLayer(I);
+        MechLayer := LayerStack.LayerObject_V7[ML1];
+        if MechLayer.MechanicalLayerEnabled then
+        begin
+            for J := (I + 1) to MaxMechLayer do
+            begin
+                ML2 := LayerUtils.MechanicalLayer(J);
+                MechLayer := LayerStack.LayerObject_V7[ML2];
+                if MechLayer.MechanicalLayerEnabled then
+                begin
+                     if MechPairs.PairDefined(ML1, ML2) then
+                     begin
+                        LayerUsed[I]:= J;
+                        LayerUsed[J]:= I;
+                     end;
+                end;
+            end;
+        end;
+    end;
+
     Rpt.Add('');
-    Rpt.Add('');
-    Rpt.Add('FootPrint                           PadStack| Primitive Counts  | Mechanical Layers                                                                                                              | 33 + ');
+    Rpt.Add('FootPrint                           PadStack| Primitive Counts  | Mechanical Layers                                                                                                             | 33 + ');
     Rpt.Add('Name                                    |PS |Pad|Reg|Trk|Txt|Fil| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10| 11| 12| 13| 14| 15| 16| 17| 18| 19| 20| 21| 22| 23| 24| 25| 26| 27| 28| 29| 30| 31| 32|...');
-    Rpt.Add('');
+    // Rpt.Add('');
+
+    LayerRow := '';
+    for I := 1 to (MaxMechLayer) do
+    begin
+        J := LayerUsed[I];
+        sLayer := IntToStr(J);
+        if J = 0 then  sLayer := ' ';  // should never happen!
+
+        if I <= cFullMechLayerReport then
+        begin
+            LayerRow := LayerRow + PadLeft(sLayer, 3) + '|';
+        end else
+        begin
+            if (J > 0) and (J > I) then     // avoid double pair reporting
+                LayerRow := LayerRow + IntToStr(I) + '=' + sLayer + '|';
+        end;
+        LayerUsed[I] := 0;
+    end;
+    Rpt.Add('                        mechanical pairs -->                    |' + LayerRow);
 
     HoleSet := MkSet(ePadObject, eViaObject);
-    for I := 0 to 1001 do
-        LayerUsed[I] := 0;
 
     Footprint := FPIterator.FirstPCBObject;
     while Footprint <> Nil Do
     begin
-// one of the next 4 or 5 lines seems to fix the erronous bounding rect of the alphabetic first item in Lib list
-// suspect it changes the Pad.Desc text as well
-
-//        CurrentLib.SetBoardToComponentByName(Footprint.Name) ;   // fn returns boolean
+//  one of the next 4 or 5 lines seems to fix the erronous bounding rect of the alphabetic first item in Lib list
+//  suspect it changes the Pad.Desc text as well
         CurrentLib.SetState_CurrentComponent (Footprint);
-
         CurrentLib.Board.ViewManager_FullUpdate;                // makes a slideshow
 //        Client.SendMessage('PCB:Zoom', 'Action=Redraw' , 255, Client.CurrentView);
         CurrentLib.Board.GraphicalView_ZoomRedraw;
@@ -155,7 +249,7 @@ begin
 //        LayerIsUsed := FootPrint.LayerUsed(TV6_Layer);
 //        FootPrint.GetState_LayersUsedArray;
 
-// electrical layers
+// electrical layers prim cnts
         TrkCount := Footprint.GetPrimitiveCount(MkSet(eTrackObject, eArcObject));
         TxtCount := Footprint.GetPrimitiveCount(MkSet(eTextObject));
         RegCount := Footprint.GetPrimitiveCount(MkSet(eRegionObject));
@@ -178,10 +272,10 @@ begin
 
         if ansipos('X', PadStack) > 0 then PadStack := 'X';   // external full stack
         if ansipos('L', PadStack) > 0 then PadStack := 'L';   // local stack
-        if ansipos('S', PadStack) > 0 then PadStack := 'S';
+        if ansipos('S', PadStack) > 0 then PadStack := 'S';   // simple
 
         FPName := Footprint.Name;
-//        Setlength(FPName, 29);
+//      Copy(FPName, 29);
 
 // mechanical layers
 
@@ -189,7 +283,7 @@ begin
         Iterator.AddFilter_ObjectSet(AllObjects);  //  MkSet(ePadObject, eViaObject));
 
         NoOfPrims := 0;
-        for I := 0 to 1001 do
+        for I := 0 to (MaxMechLayer + 1) do
             LayerPCount[I] := 0;
 
         Prim := Iterator.FirstPCBObject;
@@ -201,14 +295,14 @@ begin
 
             I := -1;
             if  LayerUtils.IsMechanicalLayer(Prim.Layer) then
-                I := LayerToIndex(Prim.Layer);
+                I := LayerToIndex(plLayerIndex, Prim.Layer);
 
             if (I <> -1) and (not InSet(Prim.ObjectId, HoleSet) ) then
             begin
                 if I = 0 then
-                begin      // oddball objects..
-                    LayerUsed[1001]   := 1;
-                    LayerPCount[1001] := LayerPCount[1001] + 1;
+                begin      // check for oddball objects..
+                    LayerUsed[MaxMechLayer + 1]   := 1;
+                    LayerPCount[MaxMechLayer + 1] := LayerPCount[MaxMechLayer + 1] + 1;
                 end else
                 begin
                     LayerUsed[I]   := 1;
@@ -219,7 +313,7 @@ begin
         end;
 
         LayerRow := '';
-        for I := 1 to (cMaxMechLayer + 1) do
+        for I := 1 to (MaxMechLayer + 1) do
         begin
             if I <= cFullMechLayerReport then
             begin
@@ -244,6 +338,8 @@ begin
     CurrentLib.Navigate_FirstComponent;
     CurrentLib.Board.GraphicalView_ZoomRedraw;
     CurrentLib.RefreshView;
+
+    plLayerIndex.Destroy;
 
     EndHourGlass;
     SaveReportLog('LayersUsedReport.txt', true);
