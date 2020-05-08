@@ -21,6 +21,7 @@ ReportLayersUsed()
 04/05/2020   BLM  v0.16 Add layers used report.
 07/05/2020        v0.17 use ParameterList to (big!) speed up layer indexing.
 08/05/2020        v0.18 list mech pairs by index , tested in AD19
+09/05/2020        v0.19 Added mechlayer used row at top of table. (not checked in AD19)
 
 note: First 4 or 5 statements run in loop seem to prevent false stale info
 
@@ -143,6 +144,7 @@ var
     LayerStack    : IPCB_LayerStack_V7;
     MechLayer     : IPCB_MechanicalLayer;
     MechPairs     : IPCB_MechanicalLayerPairs;
+    LegacyMLS     : boolean;
     MechLayerKind : TMechanicalLayerKind;
     ML1, ML2      : integer;
 
@@ -158,12 +160,12 @@ begin
 //    Units := eImperial;
 
     VerMajor := Version(true).Strings(0);
-    MaxMechLayer := AD17MaxMechLayers;
-//    LegacyMLS     := true;
+    MaxMechLayer  := AD17MaxMechLayers;
+    LegacyMLS     := true;
     MechLayerKind := NoMechLayerKind;
     if (VerMajor >= AD19VersionMajor) then
     begin
-//        LegacyMLS     := false;
+        LegacyMLS    := false;
         MaxMechLayer := AD19MaxMechLayers;
     end;
 
@@ -180,18 +182,25 @@ begin
     plLayerIndex := TParameterList.Create;
 
     for I := 0 to 1001 do
-        LayerUsed[I]   := 0;
+    begin
+        LayerUsed[I]   := 0;    // used for 'prims on layer'
+        LayerPCount[I] := 0;    // used for 'pairs' & 'prim count' 
+    end;
 
 // assume same layerstack & mech pairs for whole library
 // proper method has broken function return type so iterate.
     LayerStack := CurrentLib.Board.LayerStack_V7;
     MechPairs  := CurrentLib.Board.MechanicalPairs;
-    for I := 1 to (MaxMechLayer - 1) do
+    for I := 1 to MaxMechLayer do
     begin
         ML1 := LayerUtils.MechanicalLayer(I);
         MechLayer := LayerStack.LayerObject_V7[ML1];
+// layer must be enabled to have any primitives on it.
         if MechLayer.MechanicalLayerEnabled then
         begin
+            if MechLayer.UsedByPrims then
+                LayerUsed[I] := 1;
+
             for J := (I + 1) to MaxMechLayer do
             begin
                 ML2 := LayerUtils.MechanicalLayer(J);
@@ -200,8 +209,8 @@ begin
                 begin
                      if MechPairs.PairDefined(ML1, ML2) then
                      begin
-                        LayerUsed[I]:= J;
-                        LayerUsed[J]:= I;
+                        LayerPCount[I]:= J;
+                        LayerPCount[J]:= I;
                      end;
                 end;
             end;
@@ -213,10 +222,13 @@ begin
     Rpt.Add('Name                                    |PS |Pad|Reg|Trk|Txt|Fil| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10| 11| 12| 13| 14| 15| 16| 17| 18| 19| 20| 21| 22| 23| 24| 25| 26| 27| 28| 29| 30| 31| 32|...');
     // Rpt.Add('');
 
+// report mech pairs
+if not LegacyMLS then
+begin
     LayerRow := '';
     for I := 1 to (MaxMechLayer) do
     begin
-        J := LayerUsed[I];
+        J := LayerPCount[I];
         sLayer := IntToStr(J);
         if J = 0 then  sLayer := ' ';  // should never happen!
 
@@ -228,9 +240,35 @@ begin
             if (J > 0) and (J > I) then     // avoid double pair reporting
                 LayerRow := LayerRow + IntToStr(I) + '=' + sLayer + '|';
         end;
-        LayerUsed[I] := 0;
     end;
-    Rpt.Add('                        mechanical pairs -->                    |' + LayerRow);
+    Rpt.Add('                       mechanical pairs  -->                    |' + LayerRow);
+end;
+
+// report mech layers used
+    LayerRow := '';
+    for I := 1 to (MaxMechLayer) do
+    begin
+        J := LayerUsed[I];
+        sLayer := 'u ';
+        if J = 0 then  sLayer := ' ';  // should never happen!
+
+        if I <= cFullMechLayerReport then
+        begin
+            LayerRow := LayerRow + PadLeft(sLayer, 3) + '|';
+        end else
+        begin
+            if (J > 0) and (J > I) then     // avoid double pair reporting
+                LayerRow := LayerRow + IntToStr(I) + ': ' + sLayer + '|';
+        end;
+    end;
+    Rpt.Add('                       mechanical (u)sed -->                    |' + LayerRow);
+
+
+    for I := 0 to 1001 do
+    begin
+        LayerUsed[I]   := 0;    // used for 'prims on layer'
+        LayerPCount[I] := 0;    // used for 'prim count' 
+    end;
 
     HoleSet := MkSet(ePadObject, eViaObject);
 
