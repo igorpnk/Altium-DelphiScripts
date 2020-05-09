@@ -14,7 +14,8 @@
  BLM
 
 21/04/2020  DatafileLinkcount does not work in AD19
-09/05/2020  0.01 from ExplicitModelSourceInLibs.pas 
+09/05/2020  0.01 from ExplicitModelSourceInLibs.pas
+09/05/2020  0.02 Added PcbDoc processing. tweaked report padding/spacing.. 
 
 DBLib:
     Component is defined in the table.
@@ -54,13 +55,10 @@ Var
 
 Begin
     WS  := GetWorkspace;
-    If WS <> Nil Then
-    begin
-       Filepath := ExtractFilePath(WS.DM_FocusedDocument.DM_FullPath);
-       Prj := WS.DM_FocusedProject;
-       If Prj <> Nil Then
-          Filepath := ExtractFilePath(Prj.DM_ProjectFullPath);
-    end;
+    Filepath := ExtractFilePath(WS.DM_FocusedDocument.DM_FullPath);
+    Prj := WS.DM_FocusedProject;
+    If Prj <> Nil Then
+       Filepath := ExtractFilePath(Prj.DM_ProjectFullPath);
              
     If length(Filepath) < 5 then Filepath := 'c:\temp\';
 
@@ -117,45 +115,48 @@ end;
 
 Procedure LinkFPModelsToPcbLib;
 var
-    Board      : IPCB_Board;
-    Component  : IPCB_Component;
-    Iterator   : IPCB_BoardIterator;
-    LibIdKind       : ILibIdentifierKind;
-    LibType         : ILibraryType;
-    FoundLocation   : WideString;
-    DataFileLoc     : WideString;
-    FoundLibName    : WideString;
-    InIntLib        : boolean;
-    Found           : boolean;
-    Fix             : Boolean;
-    FLinkCount      : Integer;
+    Doc            : ISch_Document;
+    Board          : IPCB_Board;
+    Component      : IPCB_Component;
+    Iterator       : IPCB_BoardIterator;
+    LibIdKind      : ILibIdentifierKind;
+    LibType        : ILibraryType;
+    FoundLocation  : WideString;
+    DataFileLoc    : WideString;
+    FoundLibName   : WideString;
+    InIntLib       : boolean;
+    Found          : boolean;
+    Fix            : Boolean;
+    FLinkCount     : Integer;
 
 begin
     Fix     := true;                  // fix refers to changing lib prefixes
 
     IntLibMan := IntegratedLibraryManager;
     If IntLibMan = Nil Then Exit;
-
-    Prj := GetWorkSpace.DM_FocusedProject;
+    WS := GetWorkSpace;
+    if WS = nil then exit;
+    Prj := WS.DM_FocusedProject;
     if Prj = nil then
     begin
         ShowMessage('needs a focused project');
         exit;
     end;
 
-    if PCBServer = Nil then Client.StartServer('PCB');
-    If PCBServer = Nil Then Exit;
-
-    Board := PCBServer.GetCurrentPCBBoard;
-
-    if Board = nil Then
+    Doc := WS.DM_FocusedDocument;
+    if not (Doc.DM_DocumentKind = cDocKind_Pcb) then
     begin
-         ShowError('Please open a Project PcbDoc. ');
+         ShowError('Please focus a Project PcbDoc. ');
          Exit;
+    end else
+    begin
+        if PCBServer = Nil then Client.StartServer('PCB');
+        If PCBServer = Nil Then Exit;
+        Board := PCBServer.GetCurrentPCBBoard;
     end;
 
     Report := TStringList.Create;
-    Pcbserver.PreProcess;
+    PCBserver.PreProcess;
 
     Iterator := Board.BoardIterator_Create;
     Iterator.AddFilter_ObjectSet(MkSet(eComponentObject));
@@ -188,7 +189,7 @@ begin
             begin
                 Component.SourceFootprintLibrary := FoundLibName;
                 Component.SourceComponentLibrary := FoundLibName;
-                Report.Add('updated FP Comp : ' + Component.Name.Text + '  FP : ' + Component.Pattern +  '  lib : '  + FoundLibName);
+                Report.Add('updated FP Comp : ' + PadRight(Component.Name.Text, 25) + '  FP : ' + PadRight(Component.Pattern, 25) +  '  lib : '  + FoundLibName);
             end;
 
         // Notify the PCB editor that the pcb object has been modified
@@ -214,20 +215,14 @@ Var
     Iterator           : ISch_Iterator;
     Component          : ISch_Component;
     Doc                : ISch_Document;
-    j                  : Integer;
     ImplIterator       : ISch_Iterator;
     SchImpl            : ISch_Implementation;
     ModelDataFile      : ISch_ModelDatafileLink;
 
-    ModMan          : IModelTypeManager;
- //   SCModel         : ISch_Component;
     FPModel         : IPcb_LibComponent;
     InIntLib        : Boolean;
     SourceCLibName  : WideString;
     SourceDBLibName : WideString;
-    SourceDBSchLib  : WideString;
-    SourceDBSymRef  : WideString;
-    SourceDBPcbLib  : WideString;
     FoundLocation   : WideString;
     ModelDFileLoc   : WideString;
     DataFileLoc     : WideString;
@@ -235,8 +230,6 @@ Var
     FoundLibName    : WideString;
     DBTableName     : WideString;
     FoundLibPath    : WideString;
-    FoundDBTable    : WideString;
-    PcbLibPath      : WideString;
     CompLoc         : WideString;
     SymbolRef       : WideString;
     DItemID         : WideString;
@@ -246,6 +239,7 @@ Var
     LibType         : ILibraryType;
     Found           : boolean;
     Fix              : Boolean;
+    J                  : Integer;
     SLinkCount       : Integer;            // missing symbol link count
     FLinkCount       : Integer;            // missing footprint model link count
 
@@ -255,7 +249,9 @@ Begin
     IntLibMan := IntegratedLibraryManager;
     If IntLibMan = Nil Then Exit;
 
-    Prj := GetWorkSpace.DM_FocusedProject;
+    WS := GetWorkspace;
+    if WS = nil then exit;
+    Prj := WS.DM_FocusedProject;
     if Prj = nil then
     begin
         ShowMessage('needs a focused project');
@@ -267,14 +263,17 @@ Begin
     If SchServer = Nil Then Exit;
     If PCBServer = Nil Then Exit;
 
-    CurrentLib := SchServer.GetCurrentSchDocument;
-    If CurrentLib = Nil Then Exit;
+    Doc := WS.DM_FocusedDocument;
 
-    If Not ((CurrentLib.ObjectID = eSchLib) or (CurrentLib.ObjectId = eSheet)) Then
+    If Not ((Doc.DM_DocumentKind = cDocKind_SchLib) or (Doc.DM_DocumentKind = cDocKind_Sch)) Then
     Begin
-         ShowError('Please open a Project SchDoc or SchLib.');
+         ShowError('Please focus a Project SchDoc or SchLib.');
          Exit;
-    End;
+    end
+    else begin
+        CurrentLib := SchServer.GetCurrentSchDocument;
+        If CurrentLib = Nil Then Exit;
+    end; 
 
     If CurrentLib.ObjectID = eSchLib Then
         Iterator := CurrentLib.SchLibIterator_Create
