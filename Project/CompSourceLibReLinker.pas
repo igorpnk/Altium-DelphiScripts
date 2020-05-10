@@ -15,7 +15,8 @@
 
 21/04/2020  DatafileLinkcount does not work in AD19
 09/05/2020  0.01 from ExplicitModelSourceInLibs.pas
-09/05/2020  0.02 Added PcbDoc processing. tweaked report padding/spacing.. 
+09/05/2020  0.02 Added PcbDoc processing. tweaked report padding/spacing..
+10/05/2020  0.21 Iterate all project libraries for source, don't assume the 'hit' is in project lib
 
 DBLib:
     Component is defined in the table.
@@ -35,10 +36,7 @@ So .LibReference always points to a symbol in SchLib.
     Component.LibraryIdentifier;           'Database_Libs1.DBLib/Resistor'                        'STD_Resistor.IntLib'
     Component.SourceLibraryName;           'Database_Libs1.DBLib'                                 'STD_Resistor.IntLib'
     Component.SymbolReference;             same as LibRef                                         same as LibRef
-
-
-
-.......................................................................................}
+...................................................................................................................}
 
 Var
     WS        : IWorkspace;
@@ -100,6 +98,7 @@ Begin
 End;
 {..............................................................................}
 
+// unused.
 function CheckFileInProject(Prj : IProject, FullPathName : Widestring) : boolean;
 var
     I : integer;
@@ -115,7 +114,7 @@ end;
 
 Procedure LinkFPModelsToPcbLib;
 var
-    Doc            : ISch_Document;
+    Doc            : IDocument;
     Board          : IPCB_Board;
     Component      : IPCB_Component;
     Iterator       : IPCB_BoardIterator;
@@ -128,9 +127,10 @@ var
     Found          : boolean;
     Fix            : Boolean;
     FLinkCount     : Integer;
+    I              : integer;
 
 begin
-    Fix     := true;                  // fix refers to changing lib prefixes
+    Fix     := true;                  // fix refers to changing lib sources
 
     IntLibMan := IntegratedLibraryManager;
     If IntLibMan = Nil Then Exit;
@@ -146,7 +146,7 @@ begin
     Doc := WS.DM_FocusedDocument;
     if not (Doc.DM_DocumentKind = cDocKind_Pcb) then
     begin
-         ShowError('Please focus a Project PcbDoc. ');
+         ShowError('Please focus a Project based PcbDoc. ');
          Exit;
     end else
     begin
@@ -168,23 +168,33 @@ begin
     Component := Iterator.FirstPCBObject;
     While (Component <> Nil) Do
     Begin
-            FoundLocation := ''; DataFileLoc := '';
-            FoundLibName := '*';
-            LibIdKind := eLibIdentifierKind_Any;
+            LibIdKind := eLibIdentifierKind_NameWithType;   // eLibIdentifierKind_Any;
             InIntLib := False;
-
 // TLibraryType = (eLibIntegrated, eLibSource, eLibDatafile, eLibDatabase, eLibNone, eLibQuery, eLibDesignItems);
-            LibType := eLibSource;  // LibraryType(FoundLocation);
+            LibType := eLibSource;
+            Found := false;
+            FoundLocation := ''; DataFileLoc := '';
+
+            for I := 0 to (Prj.DM_LogicalDocumentCount - 1) do
+            begin
+                Doc := Prj.DM_LogicalDocuments(I);
+                if Doc.DM_DocumentKind = cDocKind_PcbLib then
+                begin
+                    FoundLibName := Doc.DM_FileName;
 
 //            DataFileLoc := IntLibMan.FindDatafileInStandardLibs(Component.Name, cDocKind_PcbLib, LibDoc.DM_FullPath, False {not IntLib}, FoundLocation);
-            DataFileLoc := IntLibMan.FindDatafileEntitySourceDatafilePath (LibIdKind, FoundLibName, Component.Pattern, cDocKind_PcbLib, InIntLib);
+                    DataFileLoc := IntLibMan.FindDatafileEntitySourceDatafilePath (LibIdKind, FoundLibName, Component.Pattern, cDocKind_PcbLib, InIntLib);
+                end;
 
-            if (DataFileLoc <> '') then Found := true;
-            FoundLibName := ExtractFilename(DataFileLoc);
-            Found := CheckFileInProject(Prj, DataFileLoc);
+                if (DataFileLoc <> '') then
+                begin
+                    Found := true;
+                    FoundLibName := ExtractFilename(DataFileLoc);
+                    break;
+                end;
+            end;
 
             if not Found then inc(FLinkCount);
-
             if Fix and Found then
             begin
                 Component.SourceFootprintLibrary := FoundLibName;
@@ -238,10 +248,10 @@ Var
     LibIdKind       : ILibIdentifierKind;
     LibType         : ILibraryType;
     Found           : boolean;
-    Fix              : Boolean;
-    J                  : Integer;
-    SLinkCount       : Integer;            // missing symbol link count
-    FLinkCount       : Integer;            // missing footprint model link count
+    Fix             : Boolean;
+    I               : Integer;
+    SLinkCount      : Integer;            // missing symbol link count
+    FLinkCount      : Integer;            // missing footprint model link count
 
 Begin
     Fix     := true;                  // fix refers to changing lib prefixes
@@ -267,7 +277,7 @@ Begin
 
     If Not ((Doc.DM_DocumentKind = cDocKind_SchLib) or (Doc.DM_DocumentKind = cDocKind_Sch)) Then
     Begin
-         ShowError('Please focus a Project SchDoc or SchLib.');
+         ShowError('Please focus a Project based SchDoc or SchLib.');
          Exit;
     end
     else begin
@@ -294,8 +304,6 @@ Begin
             SymbolRef     := '';
             FoundLocation := '';
 
-            // Fix-ups:
-            // this might stop SchEd "Update from Libraries" changing the IntLib link back to Schlib.
             DItemID := Component.DesignItemID;
             CompLibRef := Component.LibReference;
 
@@ -338,6 +346,7 @@ Begin
             LibIdKind := eLibIdentifierKind_NameWithType;
             DItemID   := Component.DesignItemID;               // prim key for DB & we set same as LibRef for IntLib/SchLib.
             CompLibID := Component.LibraryIdentifier;
+// TLibraryType = (eLibIntegrated, eLibSource, eLibDatafile, eLibDatabase, eLibNone, eLibQuery, eLibDesignItems);
             LibType   := eLibSource;
 
          // if SchDoc check symbols have IntLib/dBLib link
@@ -346,13 +355,23 @@ Begin
 //                FoundLibName := SourceCLibName;
                 FoundLibName := '*';
                 Found := false;
-                CompLoc := IntLibMan.GetComponentLocation(FoundLibName,  DItemID, FoundLocation);
 
-                FoundLibName := ExtractFilename(FoundLocation);
+                for I := 0 to (Prj.DM_LogicalDocumentCount - 1) do
+                begin
+                    Doc := Prj.DM_LogicalDocuments(I);
+                    if Doc.DM_DocumentKind = cDocKind_SchLib then
+                    begin
+                        FoundLibName := Doc.DM_FileName;
+                        CompLoc := IntLibMan.GetComponentLocation(FoundLibName,  DItemID, FoundLocation);
 
-// TLibraryType = (eLibIntegrated, eLibSource, eLibDatafile, eLibDatabase, eLibNone, eLibQuery, eLibDesignItems);
-                LibType := eLibSource;  // LibraryType(FoundLocation);
-                Found := CheckFileInProject(Prj, FoundLocation);
+                        if CompLoc <> '' then
+                        begin
+                            Found := true;
+                            FoundLibName := ExtractFilename(CompLoc);
+                            break;
+                        end;
+                    end;
+                end;
 
                 if not Found then Inc(SLinkCount);
 
@@ -415,14 +434,28 @@ Begin
 
                         TopLevelLoc := '';
                         InIntLib := False;
-                        LibIdKind := eLibIdentifierKind_Any;
-//                        LibIdKind := eLibIdentifierKind_NameWithType;
-                        FoundLibName := '*';
+//                        LibIdKind := eLibIdentifierKind_Any;
+                        LibIdKind := eLibIdentifierKind_NameWithType;
+                        Found := false;
 
-                        TopLevelLoc := IntLibMan.FindDatafileEntitySourceDatafilePath (LibIdKind, FoundLibName, SchImpl.ModelName, 'PCBLib', InIntLib);
+                        for I := 0 to (Prj.DM_LogicalDocumentCount - 1) do
+                        begin
+                            Doc := Prj.DM_LogicalDocuments(I);
+                            if Doc.DM_DocumentKind = cDocKind_PcbLib then
+                            begin
+                                FoundLibName := Doc.DM_FileName;
 
-                        FoundLibName := ExtractFilename(TopLevelLoc);
-                        Found := CheckFileInProject(Prj, TopLevelLoc);
+                                TopLevelLoc := IntLibMan.FindDatafileEntitySourceDatafilePath (LibIdKind, FoundLibName, SchImpl.ModelName, 'PCBLib', InIntLib);
+                                if TopLevelLoc <> '' then
+                                begin
+                                    Found := true;
+                                    FoundLibName := ExtractFilename(TopLevelLoc);
+                                    break;
+                                end;
+                            end;
+                        end;
+
+//                        Found := CheckFileInProject(Prj, TopLevelLoc);
                         if not Found then Inc(FLinkCount);
 
                         if Fix and Found then
