@@ -17,6 +17,7 @@
 09/05/2020  0.01 from ExplicitModelSourceInLibs.pas
 09/05/2020  0.02 Added PcbDoc processing. tweaked report padding/spacing..
 10/05/2020  0.21 Iterate all project libraries for source, don't assume the 'hit' is in project lib
+11/05/2020  0.22 Refactored some common code to fn.
 
 DBLib:
     Component is defined in the table.
@@ -112,22 +113,56 @@ begin
 //    end;
 end;
 
+function FindProjectSourceLib(Prj : IBoardProject, const DocKind : WideString, const CompName : WideString, var CompLoc : WideString) : boolean;
+var
+    Doc            : IDocument;
+    LibIdKind      : ILibIdentifierKind;
+    FoundLocation  : WideString;
+    LibName        : WideString;
+    InIntLib       : boolean;
+    I              : integer;
+
+begin
+// TLibraryType = (eLibIntegrated, eLibSource, eLibDatafile, eLibDatabase, eLibNone, eLibQuery, eLibDesignItems);
+//     LibType := eLibSource;
+
+    Result := false;
+    LibIdKind := eLibIdentifierKind_NameWithType;   // eLibIdentifierKind_Any;
+    InIntLib := False;
+
+    for I := 0 to (Prj.DM_LogicalDocumentCount - 1) do
+    begin
+        FoundLocation := ''; CompLoc := '';
+        Doc := Prj.DM_LogicalDocuments(I);
+        if Doc.DM_DocumentKind = DocKind then
+        begin
+            LibName := Doc.DM_FileName;
+            if DocKind = cDocKind_SchLib then
+                CompLoc := IntLibMan.GetComponentLocation(LibName, CompName, FoundLocation);
+
+            if DocKind = cDocKind_PcbLib then
+//                DataFileLoc := IntLibMan.FindDatafileInStandardLibs(Component.Name, cDocKind_PcbLib, LibDoc.DM_FullPath, False {not IntLib}, FoundLocation);
+                CompLoc := IntLibMan.FindDatafileEntitySourceDatafilePath (LibIdKind, LibName, CompName, cDocKind_PcbLib, InIntLib);
+        end;
+        if (CompLoc <> '') then
+        begin
+            Result := true;
+            break;
+        end;
+    end;
+end;
+
 Procedure LinkFPModelsToPcbLib;
 var
     Doc            : IDocument;
     Board          : IPCB_Board;
     Component      : IPCB_Component;
     Iterator       : IPCB_BoardIterator;
-    LibIdKind      : ILibIdentifierKind;
-    LibType        : ILibraryType;
-    FoundLocation  : WideString;
     DataFileLoc    : WideString;
     FoundLibName   : WideString;
-    InIntLib       : boolean;
     Found          : boolean;
     Fix            : Boolean;
     FLinkCount     : Integer;
-    I              : integer;
 
 begin
     Fix     := true;                  // fix refers to changing lib sources
@@ -168,33 +203,11 @@ begin
     Component := Iterator.FirstPCBObject;
     While (Component <> Nil) Do
     Begin
-            LibIdKind := eLibIdentifierKind_NameWithType;   // eLibIdentifierKind_Any;
-            InIntLib := False;
-// TLibraryType = (eLibIntegrated, eLibSource, eLibDatafile, eLibDatabase, eLibNone, eLibQuery, eLibDesignItems);
-            LibType := eLibSource;
-            Found := false;
-            FoundLocation := ''; DataFileLoc := '';
+            Found := FindProjectSourceLib(Prj, cDocKind_PcbLib, Component.Pattern, DataFileLoc); 
 
-            for I := 0 to (Prj.DM_LogicalDocumentCount - 1) do
-            begin
-                Doc := Prj.DM_LogicalDocuments(I);
-                if Doc.DM_DocumentKind = cDocKind_PcbLib then
-                begin
-                    FoundLibName := Doc.DM_FileName;
-
-//            DataFileLoc := IntLibMan.FindDatafileInStandardLibs(Component.Name, cDocKind_PcbLib, LibDoc.DM_FullPath, False {not IntLib}, FoundLocation);
-                    DataFileLoc := IntLibMan.FindDatafileEntitySourceDatafilePath (LibIdKind, FoundLibName, Component.Pattern, cDocKind_PcbLib, InIntLib);
-                end;
-
-                if (DataFileLoc <> '') then
-                begin
-                    Found := true;
-                    FoundLibName := ExtractFilename(DataFileLoc);
-                    break;
-                end;
-            end;
-
+            FoundLibName := ExtractFilename(DataFileLoc);   
             if not Found then inc(FLinkCount);
+
             if Fix and Found then
             begin
                 Component.SourceFootprintLibrary := FoundLibName;
@@ -230,10 +243,8 @@ Var
     ModelDataFile      : ISch_ModelDatafileLink;
 
     FPModel         : IPcb_LibComponent;
-    InIntLib        : Boolean;
     SourceCLibName  : WideString;
     SourceDBLibName : WideString;
-    FoundLocation   : WideString;
     ModelDFileLoc   : WideString;
     DataFileLoc     : WideString;
     TopLevelLoc     : WideString;
@@ -245,8 +256,6 @@ Var
     DItemID         : WideString;
     CompLibRef      : WideString;
     CompLibID       : WideString;
-    LibIdKind       : ILibIdentifierKind;
-    LibType         : ILibraryType;
     Found           : boolean;
     Fix             : Boolean;
     I               : Integer;
@@ -302,7 +311,6 @@ Begin
         Begin
             CompLoc       := '';
             SymbolRef     := '';
-            FoundLocation := '';
 
             DItemID := Component.DesignItemID;
             CompLibRef := Component.LibReference;
@@ -343,39 +351,17 @@ Begin
 
             if SourceCLibName  = '*' then Component.SetState_SourceLibraryName('');
 
-            LibIdKind := eLibIdentifierKind_NameWithType;
             DItemID   := Component.DesignItemID;               // prim key for DB & we set same as LibRef for IntLib/SchLib.
             CompLibID := Component.LibraryIdentifier;
-// TLibraryType = (eLibIntegrated, eLibSource, eLibDatafile, eLibDatabase, eLibNone, eLibQuery, eLibDesignItems);
-            LibType   := eLibSource;
 
          // if SchDoc check symbols have IntLib/dBLib link
             if CurrentLib.ObjectID = eSheet then
             begin
-//                FoundLibName := SourceCLibName;
-                FoundLibName := '*';
-                Found := false;
+                Found := FindProjectSourceLib(Prj, cDocKind_SchLib, DItemID, CompLoc);
 
-                for I := 0 to (Prj.DM_LogicalDocumentCount - 1) do
-                begin
-                    Doc := Prj.DM_LogicalDocuments(I);
-                    if Doc.DM_DocumentKind = cDocKind_SchLib then
-                    begin
-                        FoundLibName := Doc.DM_FileName;
-                        CompLoc := IntLibMan.GetComponentLocation(FoundLibName,  DItemID, FoundLocation);
-
-                        if CompLoc <> '' then
-                        begin
-                            Found := true;
-                            FoundLibName := ExtractFilename(CompLoc);
-                            break;
-                        end;
-                    end;
-                end;
-
+                FoundLibName := ExtractFilename(CompLoc);
                 if not Found then Inc(SLinkCount);
 
-//                if (FoundLocation <> '') Then
                 if Fix & (Found) Then
                 begin
                     Report.Add    ('   Library Path    : ' + Component.LibraryPath);
@@ -417,45 +403,20 @@ Begin
                         If Assigned(ModelDataFile) Then
                         begin
                             FoundLibName := ModelDataFile.Location;
-                            Report.Add(' Implementation Data File Link Details:');
+                            Report.Add(' Implementation Data File Link :');
                             Report.Add('   File Location: ' + FoundLibName);
                             //            + ', Entity Name: '    + ModelDataFile.EntityName
                             //            + ', FileKind: '       + ModelDataFile.FileKind);
                         end;
 
-                        // Look for a footprint models in .PCBLIB    ModelType      := 'PCBLIB';
-                        // Want SchDoc to link to source Libs.
-                        LibType  := eLibSource;
                         // unTick the bottom option (IntLib complib) in PCB footprint dialogue
                         SchImpl.UseComponentLibrary := false;
 
-                        if (FoundLibName = '') or (FoundLibName = '*') then FoundLibName := Component.SourceLibraryName;
+                        // Look for a footprint models in .PCBLIB    ModelType      := 'PCBLIB';
+                        // Want SchDoc to link to source Libs.
+                        Found := FindProjectSourceLib(Prj, cDocKind_PcbLib, SchImpl.ModelName, TopLevelLoc);
 
-
-                        TopLevelLoc := '';
-                        InIntLib := False;
-//                        LibIdKind := eLibIdentifierKind_Any;
-                        LibIdKind := eLibIdentifierKind_NameWithType;
-                        Found := false;
-
-                        for I := 0 to (Prj.DM_LogicalDocumentCount - 1) do
-                        begin
-                            Doc := Prj.DM_LogicalDocuments(I);
-                            if Doc.DM_DocumentKind = cDocKind_PcbLib then
-                            begin
-                                FoundLibName := Doc.DM_FileName;
-
-                                TopLevelLoc := IntLibMan.FindDatafileEntitySourceDatafilePath (LibIdKind, FoundLibName, SchImpl.ModelName, 'PCBLib', InIntLib);
-                                if TopLevelLoc <> '' then
-                                begin
-                                    Found := true;
-                                    FoundLibName := ExtractFilename(TopLevelLoc);
-                                    break;
-                                end;
-                            end;
-                        end;
-
-//                        Found := CheckFileInProject(Prj, TopLevelLoc);
+                        FoundLibName := ExtractFilename(TopLevelLoc);
                         if not Found then Inc(FLinkCount);
 
                         if Fix and Found then
@@ -472,8 +433,8 @@ Begin
                                     if SchImpl.Description <> FPModel.Description Then
                                        SchImpl.Description := FPModel.Description;
                                     SchImpl.UseComponentLibrary := False;
-                                    Report.Add('Updated Component Footprint Description: '  + SchImpl.Description);
-                                    Report.Add('    Footprint Height         : '  + CoordUnitToString(FPModel.Height, eMetric));
+                                    Report.Add('Updated Component FP Model Desc : '  + SchImpl.Description);
+                                    Report.Add('                  FP Height     : '  + CoordUnitToString(FPModel.Height, eMetric));
                                     FPModel := NIL;
                                 end;
                             end;
