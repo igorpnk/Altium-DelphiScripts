@@ -5,9 +5,11 @@
 
 B. Miller
 12/05/2020  v0.10  POC
+13/05/2020  v0.11  Allow pre-selection of poly obj. Select object.
 
  ..............................................................................}
-
+const
+    bDisplay = false;
 Var
    Board        : IPCB_Board;
    ReportLog    : TStringList;
@@ -39,6 +41,8 @@ Begin
     Polygon.CopperPourValidate;
 
     PCBServer.SendMessageToRobots(Polygon.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+//  required to get outline area to update!
+    Polygon.GraphicallyInvalidate;
 End;
 
 {..............................................................................}
@@ -47,6 +51,7 @@ Var
     RepourMode      : TPolygonRepourMode;
     PolyRegionKind  : TPolyRegionKind;
     Poly            : IPCB_Polygon;
+    Prim            : IPCB_Primitive;
 
     FileName     : TPCBString;
     Document     : IServerDocument;
@@ -69,12 +74,26 @@ Begin
     PCBServer.SystemOptions.PolygonRepour := eAlwaysRepour;
 
 //    Net := FindNetName('GND');
-
+    
     Poly := nil;
-    Poly := Board.GetObjectAtCursor(MkSet(ePolyObject),SignalLayers,'Select polygon to refit to Board Outline');
+
+    if Board.SelectecObjectCount > 0 then
+    begin
+        Prim := Board.SelectecObject(0);
+        if Prim.ObjectId = ePolyObject then
+            Poly := Prim;
+    end;
+
+    if Poly = nil then
+        Poly := Board.GetObjectAtCursor(MkSet(ePolyObject),SignalLayers,'Select polygon to refit to Board Outline');
+
     if Poly <> nil then
     begin
+        Poly.Selected := true;
+        ReportLog.Add('Original Outline area : ' + SqrCoordToUnitString(Poly.AreaSize, 0, 7));
         ModifyPolygonToBoardOutline(Poly);
+
+        ReportLog.Add('Refitted Outline area : ' + SqrCoordToUnitString(Poly.AreaSize, 0, 7));
     end;
 
     Client.SendMessage('PCB:Zoom', 'Action=Redraw', 255, Client.CurrentView);
@@ -82,14 +101,24 @@ Begin
     //Revert back to previous user polygon repour option.
     PCBServer.SystemOptions.PolygonRepour := RepourMode;
 
-//    FileName := ChangeFileExt(Board.FileName,'.txt');
-//    ReportLog.SaveToFile(Filename);
+// test if PCB boardfile not saved.
+    Filename := ExtractFilePath(Board.Filename);
+    if Filename = '' then
+        Filename := SpecialFolder_Temporary;
+
+    FileName := Filename + ChangeFileExt(ExtractFileName(Board.FileName), '.txt');
+
+    ReportLog.SaveToFile(Filename);
     ReportLog.Free;
 
     EndHourGlass;
 
-//    Document  := Client.OpenDocument('Text', FileName);
-//    If Document <> Nil Then
-//        Client.ShowDocument(Document);
- End;
+    Document  := Client.OpenDocument('Text', FileName);
+    If (bDisplay) and (Document <> Nil) Then
+    begin
+        Client.ShowDocument(Document);
+        if (Document.GetIsShown <> 0 ) then
+            Document.DoFileLoad;
+    end;
+End;
 
