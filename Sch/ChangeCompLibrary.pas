@@ -1,10 +1,22 @@
 {.............................................................................
 SchDoc ChangeCompLibrary.pas
   Replaces component & model DB library name(s)for name matches..
-  Can change DB Table name as well.
+  Can search/find/change DB Table name as well.
+  Can change lib from IntLib to DBLib.
+
+  Can use blank target "NewDBTable" lib table name : then tries to locate table in DBLib
+  Can use blank existing lib to match all existing components:
+     - then tries to find all components in the DBlib & any table..
+     - if found it updates the lib locations.
+
+  Can change existing table to another table without search
+  Can change existing DBlib to another without search
 
  ** Warning **
-this script does not perform smart comp location & lib updating.
+this script does not perform smart comp & model location updating.
+except for component search with dblib & tablename = ''
+
+DBlib linked components have their models connected to same DBLib & table.
 
 Author BL Miller
 from CompRenameSch.pas Ver 1.2 & ExplicitModelSourceInLibs.pas
@@ -12,7 +24,8 @@ from CompRenameSch.pas Ver 1.2 & ExplicitModelSourceInLibs.pas
 20/02/2020  0.10 POC     not finished..
 26/02/2020  0.20 Seems to work on Comp symbol & FP models
 27/02/2020  0.21 Store full vfs DBLib/Table into ModelDatafile.Location (.UseCompLib=true overrides anyway!)
-27/02/2020  0.22 better ModelDataFile.ModelType test
+27/02/2020  0.22 better ModelDataFile.FileKind SchImp-ModelType test
+14/0502020  0.23 added database lib table search
 
 
 DBLib:
@@ -36,8 +49,25 @@ So .LibReference always points to a symbol in SchLib.
     Component.SymbolReference;             same as LibRef                                         same as LibRef
 }
 
+const
+//  DB library names for comp & models.
+//  word IntLib must be spelt & typed exactly !!
+
+// existing library name, any lib type, can be blank to match ALL
+    ExCompLib  = '';                         //'Resistor.IntLib';
+    NewCompLib = 'Database_Libs1.DbLib';     // New target DbLib fullname
+
+// DB Table names
+// for IntLib the table name must be ''
+
+    ExDBTable   = '';                       // used if want to change from one named table to another
+    NewDBTable  = '' ;                     // 'RakonSTD_Resistor';     // DB table name
+
+
+
 {..............................................................................}
 Var
+    IntLibMan          : IIntegratedLibraryManager;
     ReportInfo         : TStringList;
     CurrentSheet       : ISch_Document;
     Component          : ISch_Component;
@@ -73,7 +103,7 @@ Begin
             Filepath := ExtractFilePath(Prj.DM_ProjectFullPath);
         end;
     end;
-             
+
     If length(Filepath) < 5 then Filepath := 'c:\temp\';
 
     Report.Insert(0, 'Script: ChangeCompLibrary.pas ');
@@ -99,18 +129,65 @@ Begin
 end;
 {..............................................................................}
 
+function FindDBLibTableInfo (DBLibName : WideString, DItemID : WideString, var DBTable : WideString) : Widestring;
+var
+    I, J          : Integer;
+    DBLib         : IDatabaseLibDocument;
+    LibPath       : WideString;
+    FoundLocation : WideString;
+    Found         : boolean;
+    LibCount      : Integer;
+    InsLibType    : ILibraryType;
+
+begin
+
+    Result := '';     // CompLoc
+    Found  := false;
+    IntLibMan := IntegratedLibraryManager;
+    LibCount  := IntLibMan.InstalledLibraryCount;   // zero based totals !
+
+    I := 0;
+    While (Result = '') and (I < LibCount) Do           //.Available...  <--> .Installed...
+    Begin
+        LibPath    := IntLibMan.InstalledLibraryPath(I);
+
+        if DBLibName =  ExtractFileName(LibPath) then
+        begin
+            FoundLocation := '';
+
+            if DBTable = '' then
+            begin
+                DBLib := IntLibMan.GetAvailableDBLibDocAtPath(LibPath);
+
+                J := 0;
+                While (Result = '') and (J < DBLib.GetTableCount) do
+                begin
+                    DBTable := DBLib.GetTableNameAt(J);
+                    Result := IntLibMan.GetComponentLocationFromDatabase(DBLibName, DBTable, DItemID, FoundLocation);
+
+                    inc(J);
+                end;
+
+                DBLib := Nil;
+            end
+            else
+                Result := IntLibMan.GetComponentLocationFromDatabase(DBLibName, DBTable,  DItemID, FoundLocation);
+
+        end;
+        inc(I);
+    end;
+End;
+
 {..............................................................................}
 Procedure ChangeLibraryNames;
 Var
     i                  : integer;
 
     ModelDataFile      : ISch_ModelDatafileLink;
-  
-    ExCompLib          : WideString;
-    ExDBTable          : WideString;
-    NewCompLib         : WideString;
-    NewDBTable         : WideString;
+
     NewLibPath         : WideString;
+    CompLoc            : WideString;
+    CompLocTable       : WideString;
 
     ModelLibPath       : WideString;
     ModelLibName       : WideString;
@@ -130,20 +207,6 @@ Begin
          ShowError('Please open a schematic SchDoc.');
          Exit;
     End;
-
-//  DB library names for comp & models.
-    ExCompLib  := 'Database_Libs1.DbLib';        // Existing DbLib
-    NewCompLib := 'dummy_Libs1.DbLib';           // New target DbLib fullname
-
-//    ExCompLib   := 'dummy_Libs1.DbLib';
-//    NewCompLib  := 'Database_Libs1.DbLib';
-
-// DB Table names
-    ExDBTable   := 'dummy-resistor';            // has to match existing to make change
-    NewDBTable  := 'STD_Resistor';              // DB table name
-
-//    ExDBTable   := 'STD_Resistor';
-//    NewDBTable  := 'dummy-resistor';
 
     // Create a TStringList object to store data
     ReportInfo := TStringList.Create;
@@ -182,6 +245,27 @@ Begin
                 //Component.SetState_DatabaseLibraryName(NewLibID);
                 ReportInfo.Add(Component.Designator.Text + '   ' + CompName + Component.LibReference + '  ExCompLib : ' + CompSrcLibName + '  NewLib: ' + NewCompLib);
             end;
+
+// special case blank tablename & search for table
+            if  NewDBTable = '' then
+            begin
+                if (ExCompLib = '') or (ansipos('IntLib', ExCompLib) > -1) then       // IntLibs use LibRef for unique name.
+                    CompDesignId  := CompLibRef;
+
+                CompLoc := ''; CompLocTable := '';
+                CompLoc := FindDBLibTableInfo (NewCompLib, CompDesignId, CompLocTable);
+                if CompLoc <> '' then
+                begin
+                    Component.SetState_DatabaseTableName(CompLocTable);
+                    Component.UseDBTableName := True;
+                    ReportInfo.Add(Component.Designator.Text + '   ' + CompName + Component.LibReference + '  OldDBTable : ' + PadRight(CompDBTable,15) + '  NewDBTable : ' + CompLocTable);
+                    ReportInfo.Add('');
+                end
+
+            end;
+            CompDBTable := Component.DatabaseTableName;
+
+// special case match old table & comp table
             if (ExDBTable = CompDBTable) then
             begin
                 // Component.UseDBTableName := False;
@@ -206,19 +290,15 @@ Begin
                     ReportInfo.Add('   ModelName: '         + SchImplementation.ModelName +
                                    ' ModelType: '           + SchImplementation.ModelType +
                                    ' Description: '         + SchImplementation.Description);
-                    //   ReportInfo.Add('   This Current Implementation: '  + BoolToStr(SchImplementation.IsCurrent, true));
-                    // ReportInfo.Add('   Component is in an IntegLib: '  + BoolToStr(SchImplementation.UseComponentLibrary, True));
-  //                  ReportInfo.Add('   DatabaseModel:     '            + BoolToStr(SchImplementation.DatabaseModel,   true));
-  //                  ReportInfo.Add('   IntegratedModel:   '            + BoolToStr(SchImplementation.IntegratedModel, true));
-                    SchImplementation.GetState_IdentifierString;
 
+                    SchImplementation.GetState_IdentifierString;
                     SchImplementation.UseComponentLibrary := False;
 
                     For i := 0 To (SchImplementation.DatafileLinkCount - 1) Do
                     Begin
                         ModelDataFile := SchImplementation.DatafileLink[i];
                         If ModelDataFile <> Nil Then
-                            if ModelDataFile.ModelType = cModelType_PCB then
+                            if ModelDataFile.FileKind  = cModelType_PCB then
                             Begin
                                 ModelLibPath := ModelDataFile.Location;
                                 ModelLibName := ExtractFilename(ModelLibPath);
