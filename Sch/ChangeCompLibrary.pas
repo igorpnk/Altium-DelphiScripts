@@ -26,7 +26,7 @@ from CompRenameSch.pas Ver 1.2 & ExplicitModelSourceInLibs.pas
 27/02/2020  0.21 Store full vfs DBLib/Table into ModelDatafile.Location (.UseCompLib=true overrides anyway!)
 27/02/2020  0.22 better ModelDataFile.FileKind SchImp-ModelType test
 14/0502020  0.23 added database lib table search
-
+17/05/2020  0.24 added const option to un/tick the useDatabaseTable name.
 
 DBLib:
     Component is defined in the table.
@@ -61,9 +61,11 @@ const
 // for IntLib the table name must be ''
 
     ExDBTable   = '';                       // used if want to change from one named table to another
-    NewDBTable  = '' ;                     // 'RakonSTD_Resistor';     // DB table name
+    NewDBTable  = '' ;                      // 'RakonSTD_Resistor';     // DB table name
 
-
+// Altium appears to be able to find (name match) comp in any table of a DBLib if Use Table name is '' & unticked.
+// set the Use Tablename tickbox, state is only changed if libname matches or search for table succeeds..
+    UseDBTableName = false; // true;
 
 {..............................................................................}
 Var
@@ -133,6 +135,7 @@ function FindDBLibTableInfo (DBLibName : WideString, DItemID : WideString, var D
 var
     I, J          : Integer;
     DBLib         : IDatabaseLibDocument;
+    SourcePath    : WideString;
     LibPath       : WideString;
     FoundLocation : WideString;
     Found         : boolean;
@@ -142,6 +145,7 @@ var
 begin
 
     Result := '';     // CompLoc
+    SourcePath := '';
     Found  := false;
     IntLibMan := IntegratedLibraryManager;
     LibCount  := IntLibMan.InstalledLibraryCount;   // zero based totals !
@@ -163,15 +167,17 @@ begin
                 While (Result = '') and (J < DBLib.GetTableCount) do
                 begin
                     DBTable := DBLib.GetTableNameAt(J);
-                    Result := IntLibMan.GetComponentLocationFromDatabase(DBLibName, DBTable, DItemID, FoundLocation);
-
+                    SourcePath := IntLibMan.GetComponentLocationFromDatabase(DBLibName, DBTable, DItemID, FoundLocation);
+                    Result := FoundLocation;
                     inc(J);
                 end;
 
                 DBLib := Nil;
-            end
-            else
-                Result := IntLibMan.GetComponentLocationFromDatabase(DBLibName, DBTable,  DItemID, FoundLocation);
+            end else
+            begin
+                SourcePath := IntLibMan.GetComponentLocationFromDatabase(DBLibName, DBTable,  DItemID, FoundLocation);
+                Result := FoundLocation;
+            end;
 
         end;
         inc(I);
@@ -195,6 +201,7 @@ Var
     CompSymRef         : WideString;
     CompSrcLibName     : WideString;
     CompDBTable        : WideString;
+    CompUseDBT         : boolean;
 
 Begin
     If SchServer = Nil Then Exit;
@@ -232,9 +239,10 @@ Begin
             CompSrcLibName := Component.SourceLibraryName;
             CompSymRef     := Component.SymbolReference;
             CompDBTable    := Component.DatabaseTableName;
+            CompUseDBT     := Component.UseDBTableName;
 
             ReportInfo.Add(Component.Designator.Text + ' DesignId : ' + CompDesignId + '  LibRef : ' + CompLibRef + '  LibId : ' + CompLibId
-                                                     + ' SLN : ' + CompSrcLibName + ' SymRef : ' + CompSymRef);
+                           + ' SLN : ' + CompSrcLibName + ' SymRef : ' + CompSymRef + ' tablename : ' + CompDBTable + ' use name : ' + BoolToStr(CompUseDBT, true) );
                 //     LibraryPath;
             If (Length(CompSrcLibName) = 0) or (CompSrcLibName = '*') Then
                 CompSrcLibName := 'no specific lib';
@@ -243,7 +251,7 @@ Begin
             begin
                 Component.SetState_SourceLibraryName(NewCompLib);
                 //Component.SetState_DatabaseLibraryName(NewLibID);
-                ReportInfo.Add(Component.Designator.Text + '   ' + CompName + Component.LibReference + '  ExCompLib : ' + CompSrcLibName + '  NewLib: ' + NewCompLib);
+                ReportInfo.Add(Component.Designator.Text + '   ' + CompName + Component.LibReference + ' matched ExCompLib : ' + CompSrcLibName + ' set NewLib: ' + NewCompLib);
             end;
 
 // special case blank tablename & search for table
@@ -256,9 +264,14 @@ Begin
                 CompLoc := FindDBLibTableInfo (NewCompLib, CompDesignId, CompLocTable);
                 if CompLoc <> '' then
                 begin
+                    Component.SetState_SourceLibraryName(NewCompLib);
                     Component.SetState_DatabaseTableName(CompLocTable);
-                    Component.UseDBTableName := True;
-                    ReportInfo.Add(Component.Designator.Text + '   ' + CompName + Component.LibReference + '  OldDBTable : ' + PadRight(CompDBTable,15) + '  NewDBTable : ' + CompLocTable);
+                    if UseDBTableName then
+                        Component.UseDBTableName := True
+                    else
+                        Component.UseDBTableName := False;
+
+                    ReportInfo.Add(Component.Designator.Text + '   ' + CompName + Component.LibReference + '  OldDBTable : ' + PadRight(CompDBTable,15) + ' located NewDBTable : ' + CompLocTable);
                     ReportInfo.Add('');
                 end
 
@@ -270,13 +283,17 @@ Begin
             begin
                 // Component.UseDBTableName := False;
                 Component.SetState_DatabaseTableName(NewDBTable);
-                Component.UseDBTableName := True;
-                ReportInfo.Add(Component.Designator.Text + '   ' + CompName + Component.LibReference + '  ExDBTable : ' + ExDBTable + '  NewDBTable : ' + NewDBTable);
+                if UseDBTableName then
+                    Component.UseDBTableName := True
+                else
+                    Component.UseDBTableName := False;
+
+                ReportInfo.Add(Component.Designator.Text + '   ' + CompName + Component.LibReference + ' DBTable matches ' + ExDBTable + ' set NewDBTable : ' + NewDBTable);
                 ReportInfo.Add('');
             end;
 
 // if changed then reuse for models.
-            CompDBTable    := Component.DatabaseTableName;
+            CompDBTable := Component.DatabaseTableName;
 
             SchServer.RobotManager.SendMessage(Component.I_ObjectAddress, c_BroadCast, SCHM_BeginModify, c_NoEventData);
 
@@ -316,9 +333,11 @@ Begin
                             End;
                     End;
 
-                   // sets/Ticks the bottom option (from CompLib) in PCB footprint dialogue
-                    // but only for SchDoc as compiler will change the SchLib link to IntLib.
-                    SchImplementation.UseComponentLibrary := True;
+                // Sets/Ticks the bottom option (from CompLib) in PCB footprint dialogue
+                // but only for SchDoc as compiler will change the SchLib link to IntLib.
+                // This setting sort off overrides the model path stuff above but the above helps show the source libs.
+
+                     SchImplementation.UseComponentLibrary := True;
 
                     SchImplementation := ImplIterator.NextSchObject;
                 End;
