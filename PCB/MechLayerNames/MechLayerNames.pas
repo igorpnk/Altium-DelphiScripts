@@ -16,8 +16,9 @@
  18/09/2019  : Versioncheck & set max mech layers for AD19 & later
  19/09/2019 1.1  Export: Limit continuous sequential layer export listing to below AllLayerDataMax
                  Import: test the Layer Section Key exists.
- 02/10/2019 1.2  AD19 mechlayer Kind with legacy conversion back to pair
+ 02/10/2019 1.2  AD19 mechlayer Kind with legacy conversion back to layer pair(s)
  15/10/2019 1.3  Support all (known) mech layer kinds & component layer pairs.
+ 16/02/2020 1.4  Add proc for AD ver >= 19; Convert MechLayer Kinds to Legacy mech style.
 
 Notes: Legacy fallback for AD17/18; drop ML "kind" but retain pairings & names etc.
 
@@ -29,7 +30,7 @@ const
     AD19MaxMechLayers = 1024;
     AllLayerDataMax   = 16;       // after this mech layer index only report the actual active layers.
     NoMechLayerKind   = 0;        // enum const does not exist for AD17/18
-    ctTop             = 'Top';    // text used denote mech layer kinds pairs.
+    ctTop             = 'Top';    // text used denote mech layer kind pairs.
     ctBottom          = 'Bottom';
 
 var
@@ -52,9 +53,9 @@ var
 {.................................................................................}
 function Version(const dummy : boolean) : TStringList;
 begin
-    Result := TStringList.Create;
-    Result.Delimiter := '.';
-    Result.Duplicates := dupAccept;
+    Result               := TStringList.Create;
+    Result.Delimiter     := '.';
+    Result.Duplicates    := dupAccept;
     Result.DelimitedText := Client.GetProductVersion;
 end;
 
@@ -187,7 +188,7 @@ begin
             IniFile.WriteBool  ('MechLayer' + IntToStr(i), 'SLM',     MechLayer.DisplayInSingleLayerMode);
             IniFile.WriteString('MechLayer' + IntToStr(i), 'Color',   ColorToString(Board.LayerColor[ML1]) );
 
-// if layer has valid "Kind" STILL need (our) explicit pairing to be set.
+// if layer has valid "Kind", STILL need (our) explicit pairing to be set.
             for j := 1 to MaxMechLayers do
             begin
                 ML2 := LayerUtils.MechanicalLayer(j);
@@ -309,4 +310,83 @@ begin
     IniFile.Free;
     Board.ViewManager_UpdateLayerTabs;
     ShowInfo('Mechanical Layer Names & Colours (& pairs) updated.');
+end;
+
+Procedure ConvertMechLayerKindToLegacy;
+var
+    MechLayer2     : IPCB_MechanicalLayer;
+    MPairLayer     : WideString;
+    MechLayerKind2 : TMechanicalLayerKind;
+    MLayerKindStr  : WideString;
+    MLayerKindStr2 : WideString;
+    MLayerName     : WideString;
+    MLKindRoot     : WideString;
+    MLKindRoot2    : WideString;
+
+begin
+    Board := PCBServer.GetCurrentPCBBoard;
+    if Board = nil then exit;
+
+    VerMajor := Version(true).Strings(0);
+
+    MaxMechLayers := AD17MaxMechLayers;
+    LegacyMLS     := true;
+    MechLayerKind := NoMechLayerKind;
+    if (VerMajor >= AD19VersionMajor) then
+    begin
+        MaxMechLayers := AD19MaxMechLayers;
+        LegacyMLS     := false;
+    end else
+    begin
+        ShowMessage('Requires AD19 or later to convert ');
+        exit;
+    end; 
+
+    LayerStack := Board.LayerStack_V7;
+    MechPairs  := Board.MechanicalPairs;
+
+    for i := 1 To MaxMechLayers do
+    begin
+        ML1 := LayerUtils.MechanicalLayer(i);
+        MechLayer := LayerStack.LayerObject_V7[ML1];
+
+//  existing
+        MLayerName    := MechLayer.Name;
+        MechLayerKind := MechLayer.Kind;
+        MLayerKindStr := LayerKindToStr(MechLayerKind);
+
+//        If MechLayer.MechanicalLayerEnabled then
+
+        if not (MechLayerKind = NoMechLayerKind) then
+        begin
+            MechLayerKind := NoMechLayerKind;       //  'Not Set'
+//     new "kind" pairs are treated individually by kind but are still a Pair
+            MechLayer.Kind  := MechLayerKind;
+
+
+//    remove existing mechpairs & add new ones.
+//    potentially new layer names in this file are of mech pair; only check parsed ones.
+            for j := 1 to (i - 1) do
+            begin
+                ML2            := LayerUtils.MechanicalLayer(j);
+                MechLayer2     := LayerStack.LayerObject_V7(ML2);
+                MLayerKindStr2 := LayerKindToStr(MechLayer2.Kind);
+                MechLayerKind2 := LayerStrToKind(MLayerKindStr2);
+
+//  just in case a "Kind" pair does not have "Pair" set..
+                if not MechPairs.PairDefined(ML2, ML1) then
+                begin
+                    MLKindRoot  := '';       // root basename of layer kind (Assembly, Coating, Courtyard etc)
+                    MLKindRoot2 := '';
+                    if IsMechLayerKindPair(MLayerKindStr,  MLKindRoot) and
+                       IsMechLayerKindPair(MLayerKindStr2, MLKindRoot2) then
+                        if (MLKindRoot = MLKindRoot2) and (MLKindRoot <> '') then
+                            MechPairs.AddPair(ML2, ML1);
+                end;
+            end;
+        end; // if MechLayerKind
+    end;
+
+    Board.ViewManager_UpdateLayerTabs;
+    ShowInfo('Converted Mechanical Layer Kinds To Legacy ..');
 end;
