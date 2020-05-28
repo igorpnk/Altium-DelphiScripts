@@ -33,6 +33,8 @@ Notes:
 
 Author : B.L. Miller
 29/05/2020  v0.10 inital POC
+29/05/2020  v0.11 handle Configure() having NOT been run, test SourceFilename & set to PrimaryImplDoc in Generate but don't store in OJ.
+
 ..............................................................................}
 
 Interface    // not sure this is not just ignored in delphiscript.
@@ -249,8 +251,6 @@ function PickSourceDoc(const dummy : boolean) : WideString;
 begin
     FormPickFromList.ShowModal;
     Result:= FormPickFromList.ComboBoxFiles.Items(ComboBoxFiles.ItemIndex);
-    if Result = '' then
-        Result := GetWorkSpace.DM_FocusedProject.DM_PrimaryImplementationDocument.DM_FileName;
 end;
 
 procedure testform(dummy : boolean);      // test the Form events work by removing dummy parameter
@@ -295,13 +295,12 @@ begin
 
 //    SourceFileName := cDefaultInputFileName;
 // write function to pick form list etc
+// undefined blank file name is okay..
     SourceFileName := PickSourceDoc(false);
 
     I := ParamList.IndexOfName(cSourceFileNameParameter);
     if I > -1 then
-        ParamList.ValueFromIndex(I) := SourceFileName
-    else
-        ParamList.Add(cSourceFileNameParameter + '=' + cSourceFileName);
+        ParamList.ValueFromIndex(I) := SourceFileName;
 
     Result := ParamList.DelimitedText;
     ParamList.Free;
@@ -385,12 +384,19 @@ begin
     I := ParamList.IndexOfName('TargetFileName');   // Prefix');
     if I > -1 then TargetFN := ParamList.ValueFromIndex(I);
 
-    SourceFileName := cSourceFileName;       // in case configure was never run.
+    SourceFileName := '';
     I := ParamList.IndexOfName(cSourceFileNameParameter);
     if I > -1 then
-        SourceFileName := ParamList.ValueFromIndex(I)
-    else
-        ParamList.Add(cSourceFileNameParameter + '=' + cSourceFileName);
+        SourceFileName := ParamList.ValueFromIndex(I);
+
+//  explicit filename target gets stored by Configure.
+//  don't store PCB into OJob just let it use same primary doc logic next time.
+    if SourceFileName = '' then
+    begin             // in case configure was never run.
+        SourceFileName := GetWorkSpace.DM_FocusedProject.DM_PrimaryImplementationDocument.DM_FileName;
+        if SourceFileName = '' then
+            SourceFileName := cSourceFileName;
+    end;
 
     OpenOutputs := false;
     I := ParamList.IndexOfName('OpenOutputs');
