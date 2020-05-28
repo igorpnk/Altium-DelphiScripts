@@ -38,6 +38,8 @@ B.L. Miller
 18/03/2020  v0.42 Attempt support for relative path ticked in Change.
 20/03/2020  v0.43 Add text to Summary & Notes.
 09/04/2020  v0.44 Change from fn to proc form of methods for ParameterList.
+29/05/2020  v0.45 Replace ParameterList with StringList methods.
+29/05/2020  v0.46 Output path - file was missing a path separator
 ..............................................................................}
 
 Interface    // not sure this is not just ignored in delphiscript.
@@ -206,54 +208,81 @@ End;
 // seems to pass in focused PcbDoc filename.
 Function Configure(Parameter : String) : String;
 var
-    ParamList      : TParameterList;
+    ParamList      : TStringList;
     SourceFileName : WideString;
+    I              : integer;
 
 begin
-    ParamList := TParameterList.Create;
-    ParamList.ClearAllParameters;
-    ParamList.SetState_FromString(Parameter);
+    ParamList := TStringList.Create;
+    ParamList.Clear;
+    ParamList.Delimiter  := '|';
+    ParamList.NameValueSeparator := '=';
+    ParamList.DelimitedText := Parameter;
 
+//    SourceFileName := cDefaultInputFileName;
+// write function to pick form list etc
     SourceFileName := PickSourceDoc(false);
-    ParamList.SetState_AddOrReplaceParameter(cSourceFileNameParameter, SourceFileName, true);
 
-    Result := ParamList.GetState_ToString;
-    ParamList.Destroy;
+    I := ParamList.IndexOfName(cSourceFileNameParameter);
+    if I > -1 then
+        ParamList.ValueFromIndex(I) := SourceFileName
+    else
+        ParamList.Add(cSourceFileNameParameter + '=' + cSourceFileName);
+
+    Result := ParamList.DelimitedText;
+    ParamList.Free;
 end;
 
 // OutJob Output Container "change"
 Function PredictOutputFileNames(Parameter : String) : String;
+// Parameter == TargetFolder=   TargetFileName=    TargetPrefix=   OpenOutputs=(boolean)   AddToProject=(boolean)
+// return is just the filename
 var
-    ParamList    : TParameterList;
+    ParamList    : TStringList;
     bValue       : boolean;
     TargetFolder : WideString;
     TargetFN     : WideString;
     TargetPrefix : WideString;
+    I            : integer;
 
 begin
-    // Parameter == TargetFolder=   TargetFileName=    TargetPrefix=   OpenOutputs=(boolean)   AddToProject=(boolean)
-    ParamList := TParameterList.Create;
-    ParamList.ClearAllParameters;
-    ParamList.SetState_FromString(Parameter);
+    ParamList := TStringList.Create;
+    ParamList.Clear;
+    ParamList.Delimiter  := '|';
+    ParamList.NameValueSeparator := '=';
+    ParamList.DelimitedText := Parameter;
+    ParamList.Count;
 
-    TargetFolder := '';
-    ParamList.GetState_ParameterAsString('TargetFolder', TargetFolder);
     TargetPrefix := '';
-    ParamList.GetState_ParameterAsString('TargetPrefix', TargetPrefix);
+    I := ParamList.IndexOfName('TargetPrefix');
+    if I > -1 then TargetPrefix := ParamList.ValueFromIndex(I);
+    TargetFolder := '';
+    I := ParamList.IndexOfName('TargetFolder');
+    if I > -1 then TargetFolder := ParamList.ValueFromIndex(I);
     TargetFN := '';
-    ParamList.GetState_ParameterAsString('TargetFileName', TargetFN);
+    I := ParamList.IndexOfName('TargetFileName');
+    if I > -1 then TargetFN := ParamList.ValueFromIndex(I);
 
-    ParamList.Destroy;
-
-    if TargetFN = '' then TargetFN := cDefaultReportFileName;
     Result := TargetFN;
+
+    if TargetFN = '' then
+    begin
+        Result := cDefaultReportFileName;
+//        I := ParamList.IndexOfName('TargetFileName');
+//        if I > -1 then
+//            ParamList.ValueFromIndex(I) := cDefaultOutputFileName
+//        else
+//            ParamList.Add('TargetFileName=' + cDefaultOutputFileName);
+    end;
+//    Result := ParamList.DelimitedText;
+    ParamList.Free;
 end;
 
 // OutJob Generate Output Button
 Function Generate(Parameter : String) : String;
 // Parameter == TargetFolder=   TargetFileName=    TargetPrefix=   OpenOutputs=(boolean)   AddToProject=(boolean)
 var
-    ParamList  : TParameterList;
+    ParamList      : TStringList;
     SourceFileName : WideString;
     TargetFolder   : WideString;
     TargetFN       : WideString;
@@ -264,33 +293,42 @@ var
     OpenOutputs    : boolean;
 
 begin
-    ParamList := TParameterList.Create;
-    ParamList.ClearAllParameters;
-    ParamList.SetState_FromString(Parameter);
-
-    TargetFolder := '';
-    ParamList.GetState_ParameterAsString('TargetFolder', TargetFolder);
-    TargetFN := '';
-    ParamList.GetState_ParameterAsString('TargetFileName', TargetFN);
+    ParamList := TStringList.Create;
+    ParamList.Clear;
+    ParamList.Delimiter  := '|';
+    ParamList.NameValueSeparator := '=';
+    ParamList.DelimitedText := Parameter;
 
     TargetPrefix := '';
-    ParamList.GetState_ParameterAsString('TargetPrefix', TargetPrefix);
+    I := ParamList.IndexOfName('TargetPrefix');
+    if I > -1 then TargetPrefix := ParamList.ValueFromIndex(I);
+
+    TargetFolder := '';
+    I := ParamList.IndexOfName('TargetFolder');   
+    if I > -1 then TargetFolder := ParamList.ValueFromIndex(I);
+
+    TargetFN := '';
+    I := ParamList.IndexOfName('TargetFileName');   // Prefix');
+    if I > -1 then TargetFN := ParamList.ValueFromIndex(I);
+
+    SourceFileName := cSourceFileName;       // in case configure was never run.
+    I := ParamList.IndexOfName(cSourceFileNameParameter);
+    if I > -1 then
+        SourceFileName := ParamList.ValueFromIndex(I)
+    else                                     // in case configure was never run.
+        ParamList.Add(cSourceFileNameParameter + '=' + cSourceFileName);
 
     OpenOutputs := false;
-    tmpstr := 'false';
-    ParamList.GetState_ParameterAsString('OpenOutputs', tmpstr);
-    Str2Bool(tmpstr, OpenOutputs);
+    I := ParamList.IndexOfName('OpenOutputs');
+    if I > -1 then
+        Str2Bool(ParamList.ValueFromIndex(I), OpenOutputs);
 
     AddToProject := false;
-    tmpstr := 'false';
-    ParamList.GetState_ParameterAsString('AddToProject', tmpstr);
-    Str2Bool(tmpstr, AddToProject);
+    I := ParamList.IndexOfName('AddToProject');
+    if I > -1 then
+        Str2Bool(ParamList.ValueFromIndex(I), AddToProject);
 
-    ParamList.GetState_ParameterAsString(cSourceFileNameParameter, SourceFileName);
-    if SourceFileName = '' then
-        ParamList.SetState_AddOrReplaceParameter(cSourceFileNameParameter, cSourceFileName, true);
-
-    ParamList.Destroy;
+    ParamList.Free;
 
     if TargetFolder = '' then
         TargetFolder := ExtractFilePath( GetWorkspace.DM_FocusedProject );
@@ -309,7 +347,7 @@ begin
         TargetFolder := tmpstr;
     end;
 
-    TargetFN := TargetFolder + TargetFN;
+    TargetFN := TargetFolder + PathDelim + TargetFN;
     ReportPCBStuff(SourceFileName, TargetFN, AddToProject, OpenOutputs);
 
 //   Parameter := 'simple string returned';
