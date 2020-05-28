@@ -23,6 +23,7 @@
  16/10/2019  : Added UsedByPrims; IPCB_MechanicalLayerPairs.LayerUsed() works with correct index
  31/10/2019 0.51  Added thickness for Cu & dielectric layer properties
  27/05/2020 0.52  Pastemask has a (hidden) thickness. Add thickness total
+ 28/05/2020 0.53  Don't sum soldermask thickness twice (dielectric & mask)
 
          tbd :  Use Layer Classes test in AD17 & AD19
 
@@ -197,10 +198,14 @@ begin
                 DieType   := DielectricToStr(Dielectric.DielectricType);              // TDielectricType
                 if DieType = 'Surface Material' then DieType := 'Surface';
                 Thickness := CoordUnitToString(Dielectric.DielectricHeight, eMetric);
-                TotThick := TotThick + Dielectric.DielectricHeight;
+// don't sum soldermask twice!
+                if (LayerClass = eLayerClass_Dielectric) then
+                    TotThick := TotThick + Dielectric.DielectricHeight;
+
                 DieMatl   := Dielectric.DielectricMaterial;
                 DieConst  := FloatToStr(Dielectric.DielectricConstant);
             end;
+
             if (LayerClass = eLayerClass_PasteMask) then
             begin
                 LayerObj.Name ;             // TPasteMaskLayerAdapter()
