@@ -38,6 +38,7 @@ BL Miller
 07/04/2020  v0.30 AD19 does not work same as AD17 wrt (object = nil) vs Assigned(object)
 07/04/2020  v0.31 Refactor TParameterList out for TStringList
 08/04/2020  v0.40 Use temporary file copy of initial BoM output to eliminate file locking problems.
+29/05/2020  v0.41 Always initialise Result to something in PredictOutput..() function.
 }
 
 const
@@ -158,6 +159,8 @@ begin
     TargetFN := '';
     I := ParamList.IndexOfName('TargetFileName');
     if I > -1 then TargetFN := ParamList.ValueFromIndex(I);
+
+    Result := TargetFN;
 
     if TargetFN = '' then
     begin
