@@ -15,9 +15,14 @@ in correct order to relink all components & comp models & footprints to Prj sour
 BLM
 11/05/2020  0.10 POC initial project wrapper
 12/05/2020  0.11 unbreak the lib find method.
+31/05/2020  0.12 support LibPkg projects; remove the installed lib reporting
 
 Requires a project "holder" so procedures & functions can be found/shared.
 ..............................................................................}
+const
+    ReportFileSuffix = '_LibLinkSummary';
+    ReportFileExtension = '.txt';
+    ReportFolder        = 'Reports';
 
 Var
     WS        : IWorkspace;
@@ -95,7 +100,10 @@ Procedure ReportWrapper(const Fix : boolean);
 var
     FilePath       : WideString;
     FileName       : WideString;
+    FileNumber     : integer;
+    FileNumStr     : WideString;
     ReportDocument : IServerDocument;
+
     TotSLinkCount  : Integer;            // Total missing symbol link count
     TotFLinkCount  : Integer;            // Total missing footprint model link count
     SubTotSLinkCount  : Integer;         // Total missing symbol link count in same doc type
@@ -108,9 +116,11 @@ var
 Begin
     Prj := GetWorkSpace.DM_FocusedProject;
     If Prj = Nil Then Exit;
-    if Prj.DM_ObjectKindString <> 'PCB Project' then
+// board or LibPkg(IntLib) projects
+    if not ((Prj.DM_ObjectKindString = 'PCB Project') or
+            (Prj.DM_ObjectKindString = 'Integrated Library')) then
     begin
-        ShowMessage('not a PCB project ');
+        ShowMessage('not a PCB or LibPkg project ');
         exit;
     end;
 
@@ -121,24 +131,7 @@ Begin
 
 
     Summary  := TStringList.Create;
-    Summary.Add('Library Interface information:');
-    Summary.Add('Libraries installed :-');
-
-    LibCount := IntLibMan.InstalledLibraryCount;
-    for I := 0 to (LibCount - 1) Do
-    begin
-{        case LibraryType(IntLibMan.InstalledLibraryPath(I)) of     // fn from common libIntLibMan.pas
-            eLibIntegrated : SMess := 'Integrated Lib : ';
-            eLibDatabase   : SMess := 'dBase Library  : ';
-// TLibraryType = (eLibIntegrated, eLibSource, eLibDatafile, eLibDatabase, eLibNone, eLibQuery, eLibDesignItems);
-            else
-                SMess              := 'Unusable Lib   : ';
-        end;
-}
-        Summary.Add(PadLeft(IntToStr(I),3) + '  ' + IntLibMan.InstalledLibraryPath(I));
-    end;
-
-    Summary.Add('');
+    Summary.Add('Project Library Re-Linker');
     Summary.Add('  Project: ' + Prj.DM_ProjectFileName);
     Summary.Add('');
 
@@ -188,22 +181,30 @@ Begin
     Summary.Insert(LibCount + 7, 'Total Missing Footprint Link Count  : ' + IntToStr(TotFLinkCount));
     Summary.Add('===========  EOF  ==================================');
 
-    FilePath := ExtractFilePath(Prj.DM_ProjectFullPath) + '\Reports';
-    FileName := Prj.DM_ProjectFileName;
+    FilePath := Prj.DM_ProjectFullPath;
+    FileName := ExtractFileName(FilePath) + '_' + ReportFileSuffix;
+    FilePath := ExtractFilePath(FilePath) + ReportFolder;
     if not DirectoryExists(FilePath, false) then
         DirectoryCreate(FilePath);
-    FileName := FilePath + '\' + Filename + '_LibLinkSummary.Txt';
-    Summary.SaveToFile(FileName);
 
-    ReportDocument := Client.OpenDocument('Text', FileName);
+    FileNumber := 1;
+    FileNumStr := IntToStr(FileNumber);
+    FilePath := FilePath + '\' + FileName;
+    While FileExists(FilePath + FileNumStr + ReportFileExtension) do
+    begin
+        inc(FileNumber);
+        FileNumStr := IntToStr(FileNumber)
+    end;
+    FilePath := FilePath + FileNumStr + ReportFileExtension;
+    Summary.SaveToFile(FilePath);
 
+    ReportDocument := Client.OpenDocument('Text', FilePath);
     If ReportDocument <> Nil Then
     begin
         Client.ShowDocument(ReportDocument);
         if (ReportDocument.GetIsShown <> 0 ) then
             ReportDocument.DoFileLoad;
     end;
-
 End;
 
 Procedure FixCompLibraryLinks;

@@ -1,4 +1,7 @@
-Make a project to hold both .pas files if wish to use one click project processing.
+If you want to use One click project processing then:
+   - make a script project to hold both .pas files.
+
+Can process LibPkg (IntLib) & board projects.
 
 CompSourceLibReLinker.pas 
 These exposed procedure entry points are setup for single focused document action.
@@ -6,7 +9,7 @@ These exposed procedure entry points are setup for single focused document actio
 - PcbDoc FP relinking
 
 PrjLibReLinker.pas
-These exposed procedure entry points are setup to iterate over all project documents
+These exposed procedure entry points are setup to iterate over all project (board or LibPkg) documents
 in the sequence:-
 - SchLib, to link FPmodels to source PcbLib(s)
 - SchDoc, to link comps & comp models to source libs

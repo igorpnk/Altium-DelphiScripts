@@ -24,6 +24,7 @@ by adding to a common script project.
 10/05/2020  0.21 Iterate all project libraries for source, don't assume the 'hit' is in project lib
 11/05/2020  0.22 Refactored some common code to fn.
 12/05/2020  0.23 Setup wrapper direct calls for single doc processing or external script calls.
+31/05/2020  0.24 Support LibPkg project relinking
 
 DBLib:
     Component is defined in the table.
@@ -44,6 +45,10 @@ So .LibReference always points to a symbol in SchLib.
     Component.SourceLibraryName;           'Database_Libs1.DBLib'                                 'STD_Resistor.IntLib'
     Component.SymbolReference;             same as LibRef                                         same as LibRef
 ...................................................................................................................}
+const
+    ReportFileSuffix    = '_LibLink';
+    ReportFileExtension = '.txt';
+    ReportFolder        = 'Reports';
 
 Var
     WS        : IWorkspace;
@@ -53,9 +58,12 @@ Var
 {..............................................................................}
 Procedure GenerateModelsReport (Doc : IDocument, FileSuffix : WideString, SCount : Integer, FCount : Integer);
 Var
-    Prj       : IProject;
-    Filepath  : WideString;
-    Filename  : WideString;
+    Prj        : IProject;
+    Filepath   : WideString;
+    Filename   : WideString;
+    FileNumber : integer;
+    FileNumStr : WideString;
+
     ReportDoc : IServerDocument;
 
 Begin
@@ -80,14 +88,21 @@ Begin
     Report.Insert(7, ' Missing Footprint Link Count  : ' + IntToStr(FCount) + '          search for text ---->  MISSING <---- ');
     Report.Insert(8, ' ');
 
-    Filename := Doc.DM_FileName;
-    FilePath := FilePath + 'Reports';
+    FileName := Doc.DM_FileName + '_' + ReportFileSuffix;
+    FilePath := ExtractFilePath(FilePath) + ReportFolder;
     if not DirectoryExists(FilePath, false) then
         DirectoryCreate(FilePath);
 
-    Filepath := FilePath + '\' + Filename + FileSuffix;
-//    Filepath := Filepath + Filename + FileSuffix;
-    Report.SaveToFile(Filepath);
+    FileNumber := 1;
+    FileNumStr := IntToStr(FileNumber);
+    FilePath := FilePath + '\' + FileName;
+    While FileExists(FilePath + FileNumStr + ReportFileExtension) do
+    begin
+        inc(FileNumber);
+        FileNumStr := IntToStr(FileNumber)
+    end;
+    FilePath := FilePath + FileNumStr + ReportFileExtension;
+    Report.SaveToFile(FilePath);
 
     ReportDoc := Client.OpenDocument('Text', Filepath);
     If ReportDoc <> Nil Then
@@ -487,9 +502,11 @@ begin
         ShowMessage('needs a focused project');
         exit;
     end;
-    if Prj.DM_ObjectKindString <> 'PCB Project' then
+// board or LibPkg(IntLib) projects
+    if not ((Prj.DM_ObjectKindString = 'PCB Project') or
+            (Prj.DM_ObjectKindString = 'Integrated Library')) then
     begin
-        ShowMessage('not a PCB project ');
+        ShowMessage('not a PCB or LibPkg project ');
         exit;
     end;
 
@@ -533,7 +550,9 @@ begin
         ShowMessage('needs a focused project');
         exit;
     end;
-    if Prj.DM_ObjectKindString <> 'PCB Project' then
+// board or LibPkg(IntLib) projects
+    if not ((Prj.DM_ObjectKindString = 'PCB Project') or
+            (Prj.DM_ObjectKindString = 'Integrated Library')) then
     begin
         ShowMessage('not a PCB project ');
         exit;
