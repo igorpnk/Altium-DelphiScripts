@@ -25,6 +25,7 @@ by adding to a common script project.
 11/05/2020  0.22 Refactored some common code to fn.
 12/05/2020  0.23 Setup wrapper direct calls for single doc processing or external script calls.
 31/05/2020  0.24 Support LibPkg project relinking
+05/05/2020  0.13 SerDoc methods to overcome Server open but not loaded & not updating serverview of doc.
 
 DBLib:
     Component is defined in the table.
@@ -198,10 +199,8 @@ begin
     Result := false;
     IntLibMan := IntegratedLibraryManager;
     If IntLibMan = Nil Then Exit;
+
     Prj := Doc.DM_Project;
-//    PcbLib := PcbServer.GetPcbLibraryByPath(Doc.DM_FullPath);
-//    if PcbLib = Nil then
-//        PcbLib := PcbServer.LoadPcbLibraryByPath(Doc.DM_FullPath);
     Board := PcbServer.GetPcbBoardByPath(Doc.DM_FullPath);
     if Board = Nil then
         Board := PcbServer.LoadPcbBoardByPath(Doc.DM_FullPath);
@@ -283,8 +282,6 @@ Begin
     IntLibMan := IntegratedLibraryManager;
     If IntLibMan = Nil Then Exit;
 
-//    if not LibDoc.DM_DocumentIsLoaded then
-//        LibDoc.DM_LoadDocument;
     SchLibDoc := SchServer.GetSchDocumentByPath(LibDoc.DM_FullPath);
     if SchLibDoc = Nil then
         SchLibDoc := SchServer.LoadSchDocumentByPath(LibDoc.DM_FullPath);
@@ -338,7 +335,6 @@ Begin
             Report.Add    ('   Lib Reference      : ' + Component.LibReference);
             Report.Add    ('   Lib Symbol Ref     : ' + Component.SymbolReference);
             Report.Add    ('   Lib Identifier     : ' + Component.LibraryIdentifier);
-
 
          // think '*' causes problems placing parts in SchDoc from script.(process call without full path)
             if Component.LibraryPath = '*' then
@@ -473,11 +469,8 @@ Begin
             SchLibDoc.SchIterator_Destroy(Iterator);
     End;
 
-//    SetDocumentDirty(true);
-
     GenerateModelsReport(LibDoc, '-CompModels.Txt', SLinkCount, FLinkCount);
     Report.Free;
-
 End;
 
 // direct call
@@ -485,6 +478,7 @@ Procedure LinkSchCompsToSourceLibs;
 var
     Prj         : IProject;
     Doc         : IDocument;
+    SerDoc      : IServerDocument;
     SLinkCount  : Integer;            // missing symbol link count
     FLinkCount  : Integer;            // missing footprint model link count
     Fix         : boolean;
@@ -516,16 +510,19 @@ begin
     If PCBServer = Nil Then Exit;
 
     Doc := WS.DM_FocusedDocument;
-
     If Not ((Doc.DM_DocumentKind = cDocKind_SchLib) or (Doc.DM_DocumentKind = cDocKind_Sch)) Then
     Begin
          ShowError('Please focus a Project based SchDoc or SchLib.');
          Exit;
     end;
 
+    SerDoc  := Client.OpenDocumentShowOrHide(Doc.DM_DocumentKind, Doc.DM_FullPath, true);
+    Client.ShowDocument(SerDoc);
+
     SLinkCount := 0;
     FLinkCount := 0;
     LinkSchCompsWrapped(Doc, Fix, SLinkCount, FLinkCount);
+    SerDoc.Modified := True;
 end;
 
 // direct call
@@ -533,6 +530,7 @@ Procedure LinkPcbFPToSourceLibs;
 var
     Prj         : IProject;
     Doc         : IDocument;
+    SerDoc      : IServerDocument;
     SLinkCount  : Integer;            // missing symbol link count
     FLinkCount  : Integer;            // missing footprint model link count
     Fix         : boolean;
@@ -562,16 +560,19 @@ begin
     If PCBServer = Nil Then Exit;
 
     Doc := WS.DM_FocusedDocument;
-
     If Not (Doc.DM_DocumentKind = cDocKind_Pcb) Then
     Begin
          ShowError('Please focus a Project based PcbDoc ');
          Exit;
     end;
 
+    SerDoc  := Client.OpenDocumentShowOrHide(Doc.DM_DocumentKind, Doc.DM_FullPath, true);
+    Client.ShowDocument(SerDoc);
+
     SLinkCount := 0;
     FLinkCount := 0;
     LinkFPModelsWrapped (Doc, Fix, SLinkCount, FLinkCount);
+    SerDoc.Modified := True;
 end;
 { ..............................................................................
 

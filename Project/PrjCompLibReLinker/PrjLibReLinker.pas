@@ -16,6 +16,7 @@ BLM
 11/05/2020  0.10 POC initial project wrapper
 12/05/2020  0.11 unbreak the lib find method.
 31/05/2020  0.12 support LibPkg projects; remove the installed lib reporting
+05/05/2020  0.13 SerDoc methods to overcome Server open but not loaded & not updating serverview of doc.
 
 Requires a project "holder" so procedures & functions can be found/shared.
 ..............................................................................}
@@ -52,6 +53,7 @@ end;
 function IterateTheDocs(DocKind : TDocumentKind, const Fix : Boolean, var TotSLinkCount, var TotFLinkCount : integer) : boolean;
 var
     Doc            : IDocument;
+    SerDoc         : IServerDocument;
     SLinkCount     : Integer;
     FLinkCount     : Integer;
     I              : Integer;
@@ -71,16 +73,23 @@ Begin
             Summary.Add('  Doc    : ' + Doc.DM_FileName);
             Summary.Add('');
 
+            SerDoc  := Client.OpenDocumentShowOrHide(DocKind, Doc.DM_FullPath, true);      //TPCBLibDocument or TSCH ??
+            Client.ShowDocument(SerDoc);
+
+            bSuccess := false;
             if (DocKind = cDocKind_SchLib) or (DocKind = cDocKind_Sch) then
                 bSuccess := LinkSchCompsWrapped(Doc, Fix, SLinkCount, FLinkCount);
 
-            if bSuccess and (DocKind = cDocKind_SchLib) then
+            if DocKind = cDocKind_Pcb then
+                bSuccess := LinkFPModelsWrapped (Doc, Fix, SLinkCount, FLinkCount);
+
+            if bSuccess then
+                SerDoc.Modified := True;
+
+            if (bSuccess and (DocKind = cDocKind_SchLib)) then
             begin
                 bSuccess := SafeSaveDocument(Doc, 'SCH');
             end;
-
-            if DocKind = cDocKind_Pcb then
-                bSuccess := LinkFPModelsWrapped (Doc, Fix, SLinkCount, FLinkCount);
 
             Summary.Add('  Sheet  : ' + Doc.DM_FileName);
             Summary.Add('Sheet Missing Sch Symbol Link Count : ' + IntToStr(SLinkCount));
