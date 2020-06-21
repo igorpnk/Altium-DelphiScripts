@@ -13,6 +13,7 @@
  Modified B.L. Miller
 10/06/2020  1.10  Add support Mech Layers up to eMech24.
 12/06/2020  1.20  fixed problem with iterator layersets & added layer settings to form.
+21/06/2020  1.21  Added Messages Panel notification/navigation
 
 Iterator layer filter methods use different parameters:
    .AddFilter_IPCB_LayerSet();  requires IPCB_LayerSet & LayerSetUtils interface to work correctly.
@@ -23,8 +24,14 @@ Iterator layer filter methods use different parameters:
 ..............................................................................}
 
 {..............................................................................}
+const
+    cIconOk        = 3;
+    IMG_Cross      = 4;
+    Marker_Warning = 108;
+    BoardProject   = 56;
 Var
    Board        : IPCB_Board;
+   MMPanel      : IDXPMessagesManager;
    Tolerance    : TCoord;
    Units        : TUnit;
    bCopper      : boolean;
@@ -84,7 +91,26 @@ begin
     end;
 end;
 
-procedure SelectBadConnections(const dummy :boolean);
+procedure AddMessage(MM   : IMessagesManager; MClass : WideString; MText   : WideString; MSource : WideString;
+                     MDoc : WideString; MCBProcess   : WideString; MCBPara : WideString; ImageIndex : Integer);
+var
+   F           : Boolean;
+begin
+        MM.BeginUpdate;
+        F := False;
+        If MM = Nil Then Exit;
+        MM.AddMessage({MessageClass             } MClass,
+                      {MessageText              } MText,
+                      {MessageSource            } MSource,
+                      {MessageDocument          } MDoc,
+                      {MessageCallBackProcess   } MCBProcess,
+                      {MessageCallBackParameters} MCBPara,
+                      ImageIndex,
+                      F);
+        MM.EndUpdate;
+end;
+
+procedure HighlightBadConnections(const dummy :boolean);
 var
    BIter      : IPCB_BoardIterator;
    SIter      : IPCB_SpatialIterator;
@@ -98,7 +124,19 @@ var
    CLayer     : TLayer;
    LayerSet   : IPCB_LayerSet;
    dValue     : extended;
+   MMessage   : WideString;
+   MSource    : WideString;
+   FPObjAddr  : TPCBObjectHandle;
+
 begin
+
+    MMPanel.ClearMessages;
+    GetWorkSpace.DM_ShowMessageView;
+    MSource := 'SelectBadConnections Project script';
+    MMessage := 'Highlight Bad Connections script started';
+    AddMessage(MMPanel,'[Info]',MMessage ,MSource , Board.FileName, '', '', BoardProject);
+
+
    TempString := EditTolerance.Text;
    if LastDelimiter(',.', TempString) = Length(TempString) then
       SetLength(TempString, Length(TempString - 1))
@@ -208,18 +246,26 @@ begin
             Prim2 := SIter.NextPCBObject;
          end;
 
-         if not Found then Prim1.Selected := True;
+         if not Found then
+         begin
+             FPObjAddr := Prim1.I_ObjectAddress;
+             MMessage := Prim1.Descriptor;
+             AddMessage(MMPanel, '[warning]', MMessage , MSource, Board.FileName, 'PCB:CrossProbeNotify', 'Kind=Primitive|Handle='+ IntToStr(FPObjAddr), Marker_Warning);
+             Prim1.Selected := True;
+         end;
       end;  // for i
 
       Prim1 := BIter.NextPCBObject;
    end;
    Board.SpatialIterator_Destroy(SIter);
    Board.BoardIterator_Destroy(BIter);
+end;
 
+procedure SetFiltermask(dummy : boolean);
+begin
    Board.SetState_ViewManager_FilterChanging;
+//   Client.SendMessage('PCB:RunQuery','Apply=True|Expr=IsSelected|Select=False|Mask=True', Length('Apply=True|Expr=IsSelected|Select=True|Mask=True'), Client.CurrentView);
    Client.PostMessage('PCB:RunQuery','Apply=True|Expr=IsSelected|Select=False|Mask=True', Length('Apply=True|Expr=IsSelected|Select=True|Mask=True'), Client.CurrentView);
-// ConfigPCBFilter('Clear=True|Expr=All|Zoom=False|Select=False|Mask=False');
-
 end;
 
 Procedure Start;
@@ -227,20 +273,22 @@ begin
 // form create event has already happened!
    Board := PCBServer.GetCurrentPCBBoard;
    if Board = nil then exit;
-   FormSelectBadConnections.ShowModal;
+   MMPanel := GetWorkSpace.DM_MessagesManager;
+   FormSelectBadConnections.Show; //  .ShowModal;
 end;
 
 {..............................................................................}
 procedure TFormSelectBadConnections.ButtonOKClick(Sender: TObject);
 begin
 //    FormSelectBadConnections.Hide;
-    SelectBadConnections(true);
+    HighlightBadConnections(true);
 //    FormSelectBadConnections.Show;
 end;
 
 procedure TFormSelectBadConnections.ButtonCancelClick(Sender: TObject);
 begin
    FormSelectBadConnections.Close;
+   SetFilterMask(true);
    exit;
 end;
 
@@ -310,5 +358,10 @@ begin
 
     if (bCurrent) then CheckBoxCurrent.State := cbChecked
     else CheckBoxCurrent.State := cbUnchecked;
+end;
+
+procedure TFormSelectBadConnections.ClearMMPanelClick(Sender: TObject);
+begin
+   MMPanel.ClearMessages; // ForDocument(Board.FileName);
 end;
 

@@ -2,16 +2,18 @@ object FormSelectBadConnections: TFormSelectBadConnections
   Left = 0
   Top = 0
   Caption = 'Select Bad Connections'
-  ClientHeight = 153
-  ClientWidth = 236
+  ClientHeight = 179
+  ClientWidth = 216
   Color = clBtnFace
   Font.Charset = DEFAULT_CHARSET
   Font.Color = clWindowText
   Font.Height = -11
   Font.Name = 'Tahoma'
   Font.Style = []
+  FormStyle = fsStayOnTop
   OldCreateOrder = False
   OnCreate = FormSelectBadConnectionsCreate
+  FormKind = fkNormal
   PixelsPerInch = 96
   TextHeight = 13
   object Label1: TLabel
@@ -44,8 +46,8 @@ object FormSelectBadConnections: TFormSelectBadConnections
     OnChange = EditToleranceChange
   end
   object ButtonOK: TButton
-    Left = 144
-    Top = 112
+    Left = 128
+    Top = 144
     Width = 75
     Height = 25
     Caption = 'OK'
@@ -55,7 +57,7 @@ object FormSelectBadConnections: TFormSelectBadConnections
   end
   object ButtonCancel: TButton
     Left = 16
-    Top = 112
+    Top = 144
     Width = 75
     Height = 25
     Caption = 'Cancel'
@@ -106,5 +108,14 @@ object FormSelectBadConnections: TFormSelectBadConnections
     State = cbChecked
     TabOrder = 6
     OnClick = CheckBoxCurrentClick
+  end
+  object ClearMMPanel: TButton
+    Left = 16
+    Top = 104
+    Width = 88
+    Height = 25
+    Caption = 'Clear MMPanel'
+    TabOrder = 7
+    OnClick = ClearMMPanelClick
   end
 end
