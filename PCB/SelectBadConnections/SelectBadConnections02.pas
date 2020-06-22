@@ -14,6 +14,7 @@
 10/06/2020  1.10  Add support Mech Layers up to eMech24.
 12/06/2020  1.20  fixed problem with iterator layersets & added layer settings to form.
 21/06/2020  1.21  Added Messages Panel notification/navigation
+22/06/2020  1.22  Added actual x & y values to messages
 
 Iterator layer filter methods use different parameters:
    .AddFilter_IPCB_LayerSet();  requires IPCB_LayerSet & LayerSetUtils interface to work correctly.
@@ -31,9 +32,10 @@ const
     BoardProject   = 56;
 Var
    Board        : IPCB_Board;
+   BOrigin      : TPoint;
+   Units        : TUnit;
    MMPanel      : IDXPMessagesManager;
    Tolerance    : TCoord;
-   Units        : TUnit;
    bCopper      : boolean;
    bMech        : boolean;
    bCurrent     : boolean;
@@ -129,7 +131,8 @@ var
    FPObjAddr  : TPCBObjectHandle;
 
 begin
-
+//    Units := Board.DisplayUnit;
+    BOrigin := Point(Board.XOrigin, Board.YOrigin);
     MMPanel.ClearMessages;
     GetWorkSpace.DM_ShowMessageView;
     MSource := 'SelectBadConnections Project script';
@@ -249,7 +252,7 @@ begin
          if not Found then
          begin
              FPObjAddr := Prim1.I_ObjectAddress;
-             MMessage := Prim1.Descriptor;
+             MMessage := Prim1.Descriptor + '  ' + CoordUnitToString((X-BOrigin.X),Units) + ' ' + CoordUnitToString((Y-BOrigin.Y), Units);
              AddMessage(MMPanel, '[warning]', MMessage , MSource, Board.FileName, 'PCB:CrossProbeNotify', 'Kind=Primitive|Handle='+ IntToStr(FPObjAddr), Marker_Warning);
              Prim1.Selected := True;
          end;
