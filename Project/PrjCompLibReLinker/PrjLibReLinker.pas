@@ -21,7 +21,7 @@ BLM
 Requires a project "holder" so procedures & functions can be found/shared.
 ..............................................................................}
 const
-    ReportFileSuffix = '_LibLinkSummary';
+    ReportFileSuffix    = '_LibLinkSummary';
     ReportFileExtension = '.txt';
     ReportFolder        = 'Reports';
 

@@ -26,6 +26,7 @@ by adding to a common script project.
 12/05/2020  0.23 Setup wrapper direct calls for single doc processing or external script calls.
 31/05/2020  0.24 Support LibPkg project relinking
 05/05/2020  0.13 SerDoc methods to overcome Server open but not loaded & not updating serverview of doc.
+24/06/2020  0.14 Add patch fix for DesignItemId blank in SchDoc.
 
 DBLib:
     Component is defined in the table.
@@ -170,7 +171,8 @@ begin
             LibName := Doc.DM_FullPath;   // Doc.DM_Filename;
             if (DocKind = cDocKind_SchLib) then
                 CompLoc := IntLibMan.FindComponentLibraryPath(LibIdKind, LibName, CompName);
-//  this stopped working when processing whoel project?
+
+//  this stopped working when processing whole project?
 //                CompLoc := IntLibMan.GetComponentLocation(LibName, CompName, FoundLocation);
 
             if (DocKind = cDocKind_PcbLib) then
@@ -304,13 +306,13 @@ Begin
 
         While Component <> Nil Do
         Begin
-            CompLoc       := '';
-            SymbolRef     := '';
+            CompLoc    := '';
+            SymbolRef  := '';
 
-            DItemID := Component.DesignItemID;
+            DItemID    := Component.DesignItemID;
             CompLibRef := Component.LibReference;
 
-            If SchLibDoc.ObjectID = eSchLib then
+            if SchLibDoc.ObjectID = eSchLib then
             begin
                 Component.SetState_SourceLibraryName(ExtractFilename(SchLibDoc.DocumentName));
                 // fix components extracted from dBlib into SchLib/IntLib with problems..
@@ -325,12 +327,16 @@ Begin
             SourceDBLibName := Component.DatabaseLibraryName;
             DBTableName     := Component.DatabaseTableName;
 
-            If SchLibDoc.ObjectID = eSheet Then
-                Report.Add(' Component Designator : '                 + Component.Designator.Text);
+            if SchLibDoc.ObjectID = eSheet then
+            begin
+                Report.Add(' Component Designator : ' + Component.Designator.Text);
+                if DItemId = '' then Component.DesignItemID := Component.LibReference;
+            end;
             if DItemId <> Component.DesignItemId then
                 Report.Add('   DesignItemID       : ' + DItemID + ' fixed -> ' + Component.DesignItemID)
             else
                 Report.Add('   DesignItemID       : ' + DItemID);
+
             Report.Add    ('   Source Lib Name    : ' + SourceCLibName);
             Report.Add    ('   Lib Reference      : ' + Component.LibReference);
             Report.Add    ('   Lib Symbol Ref     : ' + Component.SymbolReference);
