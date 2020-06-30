@@ -28,6 +28,7 @@ by adding to a common script project.
 05/05/2020  0.13 SerDoc methods to overcome Server open but not loaded & not updating serverview of doc.
 24/06/2020  0.14 Add patch fix for DesignItemId blank in SchDoc.
 30/06/2020  0.15 Added DMObjects workaround for broken ISch_Implementation in AD19+
+01/07/2020  0.16 convert version major to int value to test.
 
 DBLib:
     Component is defined in the table.
@@ -52,7 +53,7 @@ const
     ReportFileSuffix    = '_LibLink';
     ReportFileExtension = '.txt';
     ReportFolder        = 'Reports';
-    cMajorVerAD19       = '19';
+    cMajorVerAD19       = 19;
 
 Var
     WS        : IWorkspace;
@@ -355,12 +356,12 @@ Begin
     if SchLibDoc = Nil Then Exit;
 
     VerMajor := Version(true).Strings(0);
-    // (VerMajor >= cMajorVerAD19) and
+    // (StrToInt(VerMajor) >= cMajorVerAD19) and
     if (LibDoc.DM_UniqueComponentCount = 0) then LibDoc.DM_Compile;
 
 //    workaround for broken fn in AD19 & 20
     UseDMOMethod := false;
-    if (VerMajor >= cMajorVerAD19) then UseDMOMethod := true;
+    if (StrToInt(VerMajor) >= cMajorVerAD19) then UseDMOMethod := true;
 
     If SchLibDoc.ObjectID = eSchLib Then
     begin
