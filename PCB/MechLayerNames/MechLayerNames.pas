@@ -19,6 +19,7 @@
  02/10/2019 1.2  AD19 mechlayer Kind with legacy conversion back to layer pair(s)
  15/10/2019 1.3  Support all (known) mech layer kinds & component layer pairs.
  16/02/2020 1.4  Add proc for AD ver >= 19; Convert MechLayer Kinds to Legacy mech style.
+ 01/07/2020 1.41 convert version major to int value to test.
 
 Notes: Legacy fallback for AD17/18; drop ML "kind" but retain pairings & names etc.
 
@@ -145,7 +146,7 @@ begin
     MaxMechLayers := AD17MaxMechLayers;
     LegacyMLS     := true;
     MechLayerKind := NoMechLayerKind;
-    if (VerMajor >= AD19VersionMajor) then
+    if (StrToInt(VerMajor) >= AD19VersionMajor) then
     begin
         LegacyMLS     := false;
         MaxMechLayers := AD19MaxMechLayers;
@@ -225,7 +226,7 @@ begin
     MaxMechLayers := AD17MaxMechLayers;
     LegacyMLS     := true;
     MechLayerKind := NoMechLayerKind;
-    if (VerMajor >= AD19VersionMajor) then
+    if (StrToInt(VerMajor) >= AD19VersionMajor) then
     begin
         MaxMechLayers := AD19MaxMechLayers;
         LegacyMLS     := false;
@@ -332,7 +333,7 @@ begin
     MaxMechLayers := AD17MaxMechLayers;
     LegacyMLS     := true;
     MechLayerKind := NoMechLayerKind;
-    if (VerMajor >= AD19VersionMajor) then
+    if (StrToInt(VerMajor) >= AD19VersionMajor) then
     begin
         MaxMechLayers := AD19MaxMechLayers;
         LegacyMLS     := false;

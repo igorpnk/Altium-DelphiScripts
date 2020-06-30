@@ -24,6 +24,7 @@
  31/10/2019 0.51  Added thickness for Cu & dielectric layer properties
  27/05/2020 0.52  Pastemask has a (hidden) thickness. Add thickness total
  28/05/2020 0.53  Don't sum soldermask thickness twice (dielectric & mask)
+ 01/07/2020 0.54  convert version major to int value to test.
 
          tbd :  Use Layer Classes test in AD17 & AD19
 
@@ -127,7 +128,7 @@ begin
     VerMajor := Version(true).Strings(0);
     LegacyMLS     := true;
     MechLayerKind := NoMechLayerKind;
-    if (VerMajor >= AD19VersionMajor) then
+    if (StrToInt(VerMajor) >= AD19VersionMajor) then
         LegacyMLS     := false;
 
     WS := GetWorkSpace;
