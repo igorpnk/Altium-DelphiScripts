@@ -27,6 +27,7 @@ by adding to a common script project.
 31/05/2020  0.24 Support LibPkg project relinking
 05/05/2020  0.13 SerDoc methods to overcome Server open but not loaded & not updating serverview of doc.
 24/06/2020  0.14 Add patch fix for DesignItemId blank in SchDoc.
+30/06/2020  0.15 Added DMObjects workaround for broken ISch_Implementation in AD19+
 
 DBLib:
     Component is defined in the table.
@@ -51,11 +52,13 @@ const
     ReportFileSuffix    = '_LibLink';
     ReportFileExtension = '.txt';
     ReportFolder        = 'Reports';
+    cMajorVerAD19       = '19';
 
 Var
     WS        : IWorkspace;
     IntLibMan : IIntegratedLibraryManager;
     Report    : TStringList;
+    VerMajor  : WideString;
 
 {..............................................................................}
 Procedure GenerateModelsReport (Doc : IDocument, FileSuffix : WideString, SCount : Integer, FCount : Integer);
@@ -115,7 +118,13 @@ Begin
     end;
 end;
 {..............................................................................}
-
+function Version(const dummy : boolean) : TStringList;
+begin
+    Result               := TStringList.Create;
+    Result.Delimiter     := '.';
+    Result.Duplicates    := dupAccept;
+    Result.DelimitedText := Client.GetProductVersion;
+end;
 {..............................................................................}
 Procedure SetDocumentDirty (Dummy : Boolean);
 Var
@@ -186,7 +195,58 @@ begin
         end;
     end;
 end;
+{......................................................................................................}
+function GetDMComponent(Doc : IDocument, Component : ISch_Component) : IComponent;
+var
+    I      : integer;
+    DMComp : IComponent;
+    DK     : WideString;
+    found  : boolean;
+begin
+    Result := nil;
+    DK     := Doc.DM_DocumentKind;
+    Doc.DM_ComponentCount;
+// SchLib does NOT have UniqueId
+    found := false;
+    for I := 0 to (Doc.DM_UniqueComponentCount - 1) do
+    begin
+        DMComp := Doc.DM_UniqueComponents(I);
+//        Doc.DM_UniqueComponents(I).DM_UniqueId;
+        if (DK = cDocKind_Sch) and (DMComp.DM_UniqueIdName = Component.UniqueId) then
+            found := true;
+        if (DK = cDocKind_SchLib) and (DMComp.DM_LibraryReference = Component.LibReference) then
+            found := true;
+        if found then
+        begin
+            Result := Doc.DM_UniqueComponents(I);
+            break;
+        end;
+    end;
+end;
+{......................................................................................................}
+function GetDMCompImplementation(DMComp : IComponent, SchImpl : ISch_Implementation) : IComponentImplementation;
+var
+    I : integer;
+begin
+    Result := nil;
+    if DMComp <> nil then
+    begin
+        for I := 0 to (DMComp.DM_ImplementationCount - 1) do
+        begin
+            if (DMComp.DM_Implementations(I).DM_ModelName = SchImpl.ModelName) and
+               (DMComp.DM_Implementations(I).DM_ModelType = SchImpl.ModelType) then Result := DMComp.DM_Implementations(I);
+        end;
+    end;
+end;
 
+function ModelDataFileLocation(ModelDataFile : ISch_ModelDatafileLink, DMCompImpl : IComponentImplementation , UseDMOMethod : boolean) : WideString;
+begin
+    Result := '';
+    if ModelDataFile <> nil then Result := ModelDataFile.Location;
+    if (UseDMOMethod) then
+        if DMCompImpl <> nil then Result := DMCompImpl.DM_DatafileLocation(0);
+end;
+{........................................................................................................}
 function LinkFPModelsWrapped (Doc : IDocument, const Fix : boolean, var SLinkCount, var FLinkCount : integer) : boolean;
 var
     Prj            : IBoardProject;
@@ -254,6 +314,10 @@ end;
 function LinkSchCompsWrapped(LibDoc : IDocument, Fix : boolean, var SLinkCount, var FLinkCount : integer) : boolean;
 Var
     Prj             : IBoardProject;
+    Doc             : IDocument;      // DMObjects
+    DMComp          : IComponent;
+    DMCompImpl      : IComponentImplementation;
+
     SchLibDoc       : ISch_Lib;
     CurrentSheet    : ISch_Document;
     Iterator        : ISch_Iterator;
@@ -277,6 +341,7 @@ Var
     CompLibID       : WideString;
     Found           : boolean;
     I               : Integer;
+    UseDMOMethod    : boolean;
 
 Begin
     Result := false;
@@ -288,6 +353,14 @@ Begin
     if SchLibDoc = Nil then
         SchLibDoc := SchServer.LoadSchDocumentByPath(LibDoc.DM_FullPath);
     if SchLibDoc = Nil Then Exit;
+
+    VerMajor := Version(true).Strings(0);
+    // (VerMajor >= cMajorVerAD19) and
+    if (LibDoc.DM_UniqueComponentCount = 0) then LibDoc.DM_Compile;
+
+//    workaround for broken fn in AD19 & 20
+    UseDMOMethod := false;
+    if (VerMajor >= cMajorVerAD19) then UseDMOMethod := true;
 
     If SchLibDoc.ObjectID = eSchLib Then
     begin
@@ -306,11 +379,16 @@ Begin
 
         While Component <> Nil Do
         Begin
-            CompLoc    := '';
-            SymbolRef  := '';
+            CompLoc      := '';
+            SymbolRef    := '';
+            TopLevelLoc  := '';
+            FoundLibName := '';
 
             DItemID    := Component.DesignItemID;
             CompLibRef := Component.LibReference;
+
+            If Fix Then SchServer.RobotManager.SendMessage(Component.I_ObjectAddress, c_BroadCast, SCHM_BeginModify, c_NoEventData);
+            DMComp := GetDMComponent(LibDoc, Component);
 
             if SchLibDoc.ObjectID = eSchLib then
             begin
@@ -379,82 +457,81 @@ Begin
 
             ImplIterator := Component.SchIterator_Create;
             ImplIterator.AddFilter_ObjectSet(MkSet(eImplementation));
+            SchImpl := ImplIterator.FirstSchObject;
 
-            Try
-                SchImpl := ImplIterator.FirstSchObject;
-                While SchImpl <> Nil Do
-                Begin
-                    Report.Add(' Implementation Model details:');
-                    Report.Add('   Name : ' + SchImpl.ModelName + '   Type : ' + SchImpl.ModelType +
-                                   '   Description : ' + SchImpl.Description);
-                    Report.Add('   Map :  ' + SchImpl.MapAsString);
+            While SchImpl <> Nil Do
+            Begin
+                Report.Add(' Implementation Model details:');
+                Report.Add('   Name : ' + SchImpl.ModelName + '   Type : ' + SchImpl.ModelType +
+                           '   Description : ' + SchImpl.Description);
+                Report.Add('   Map :  ' + SchImpl.MapAsString);
 
-                    If SchImpl.ModelType = cModelType_PCB Then
-                    begin
-                        If (SchLibDoc.ObjectID = eSheet) and SchImpl.IsCurrent Then
+                If SchImpl.ModelType = cModelType_PCB Then
+                begin
+                    DMCompImpl := GetDMCompImplementation(DMComp, SchImpl);
+
+                    If (SchLibDoc.ObjectID = eSheet) and SchImpl.IsCurrent Then
                             Report.Add(' Is Current (default) FootPrint Model:');
 
-                        If SchImpl.DatafileLinkCount = 0 then // missing FP PcbLib link
+                    If SchImpl.DatafileLinkCount = 0 then // missing FP PcbLib link
+                    begin
+                        SchImpl.AddDataFileLink(SchImpl.ModelName, '', cModelType_PCB);
+                    end;
+
+                    SchImpl.DatalinksLocked := False;
+                    ModelDataFile := SchImpl.DatafileLink(0);
+                    FoundLibName := '*';
+
+                    FoundLibName := ModelDataFileLocation(ModelDataFile, DMCompImpl, UseDMOMethod);
+                  //  FoundLibName := DMCompImpl.DM_DatafileFullPath(0, ) ;
+                  //            + ', Entity Name: '    + ModelDataFile.EntityName
+                  //            + ', FileKind: '       + ModelDataFile.FileKind);
+
+                    // unTick the bottom option (IntLib complib) in PCB footprint dialogue
+                    SchImpl.UseComponentLibrary := false;
+
+                    // Look for a footprint models in .PCBLIB    ModelType      := 'PCBLIB';
+                    // Want SchDoc to link to source Libs.
+                    Found := FindProjectSourceLib(Prj, cDocKind_PcbLib, SchImpl.ModelName, TopLevelLoc);
+
+                    FoundLibName := ExtractFilename(TopLevelLoc);
+                    if not Found then Inc(FLinkCount);
+
+                    if Fix and Found then
+                    begin
+                        if (UseDMOMethod) then
                         begin
-                            SchImpl.AddDataFileLink(SchImpl.ModelName, '', cModelType_PCB);
+                            if DMCompImpl <> nil then DMCompImpl.DM_SetDatafileLocation(0) := FoundLibName;
                         end;
+                        if Assigned(ModelDataFile) then  ModelDataFile.Location := FoundLibName;
 
-                        SchImpl.DatalinksLocked := False;
-                        ModelDataFile := SchImpl.DatafileLink(0);
-                        FoundLibName := '*';
-                        If Assigned(ModelDataFile) Then
-                        begin
-                            FoundLibName := ModelDataFile.Location;
-                            Report.Add(' Implementation Data File Link :');
-                            Report.Add('   File Location: ' + FoundLibName);
-                            //            + ', Entity Name: '    + ModelDataFile.EntityName
-                            //            + ', FileKind: '       + ModelDataFile.FileKind);
-                        end;
-
-                        // unTick the bottom option (IntLib complib) in PCB footprint dialogue
-                        SchImpl.UseComponentLibrary := false;
-
-                        // Look for a footprint models in .PCBLIB    ModelType      := 'PCBLIB';
-                        // Want SchDoc to link to source Libs.
-                        Found := FindProjectSourceLib(Prj, cDocKind_PcbLib, SchImpl.ModelName, TopLevelLoc);
-
-                        FoundLibName := ExtractFilename(TopLevelLoc);
-                        if not Found then Inc(FLinkCount);
-
-                        if Fix and Found then
-                        begin
-                            ModelDataFile.Location := FoundLibName;
-                            Report.Add('   Updated Model Location: ' + FoundLibName);
-                            // no point trying update FP description & height in a SchDoc.
-                            if SchLibDoc.ObjectID = eSchLib then
-                            Begin
-                                //FPModel := GetDatafileInLibrary(ModelDataFile.EntityName, eLibSource, InIntLib, FoundLocation);
-                                FPModel := PcbServer.LoadCompFromLibrary(SchImpl.ModelName, TopLevelLoc);
-                                if FPModel <> NIL then
-                                begin
-                                    if SchImpl.Description <> FPModel.Description Then
-                                       SchImpl.Description := FPModel.Description;
-                                    SchImpl.UseComponentLibrary := False;
-                                    Report.Add('Updated Component FP Model Desc : '  + SchImpl.Description);
-                                    Report.Add('                  FP Height     : '  + CoordUnitToString(FPModel.Height, eMetric));
-                                    FPModel := NIL;
-                                end;
+                        Report.Add('   Updated Model Location: ' + FoundLibName);
+                     // no point trying update FP description & height in a SchDoc.
+                        if SchLibDoc.ObjectID = eSchLib then
+                        Begin
+                            // FPModel := GetDatafileInLibrary(ModelDataFile.EntityName, eLibSource, InIntLib, FoundLocation);
+                            FPModel := PcbServer.LoadCompFromLibrary(SchImpl.ModelName, TopLevelLoc);
+                            if FPModel <> NIL then
+                            begin
+                                if SchImpl.Description <> FPModel.Description Then
+                                   SchImpl.Description := FPModel.Description;
+                                SchImpl.UseComponentLibrary := False;
+                                Report.Add('Updated Component FP Model Desc : '  + SchImpl.Description);
+                                Report.Add('                  FP Height     : '  + CoordUnitToString(FPModel.Height, eMetric));
+                                FPModel := NIL;
                             end;
                         end;
+                    end;
 
-                        ModelDFileLoc := ModelDataFile.Location;
-                        if trim(ModelDFileLoc) = ''  then ModelDFileLoc := '---->  MISSING <----';
-                        Report.Add(' Implementation Data File Link Details : ');
-                        Report.Add('   File Location : ' + ModelDFileLoc);
-                        Report.Add('');
-
-                    End;
-                    SchImpl := ImplIterator.NextSchObject;
+                    ModelDFileLoc := ModelDataFileLocation(ModelDataFile, DMCompImpl, UseDMOMethod);
+                    if Trim(ModelDFileLoc) = ''  then ModelDFileLoc := '---->  MISSING <----';
+                    Report.Add('   File Location : ' + ModelDFileLoc);
+                    Report.Add('');
                 End;
 
-            Finally
-                Component.SchIterator_Destroy(ImplIterator);
+                SchImpl := ImplIterator.NextSchObject;
             End;
+            Component.SchIterator_Destroy(ImplIterator);
 
             Report.Add('');
             Report.Add('');

@@ -17,3 +17,6 @@ in the sequence:-
 
 All summary reports are created in subfolder "Reports"
 
+version AD19+ :
+Alternative DMObjects method as ISch_Implementation has issues
+Has to compile each Sheet.
