@@ -4,6 +4,10 @@ BL Miller
 10/07/2020  v0.10 POC
 11/07/2020  v0.11 added Messages Panel due to useless PlaceLocation.
 
+TBD
+   Verify result to external reference
+   Add support for board cutouts (big holes)
+   Try fix (waste more hours) PlaceLocation Marks.
 }
 
 Const
