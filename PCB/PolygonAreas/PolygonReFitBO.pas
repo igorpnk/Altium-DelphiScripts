@@ -2,14 +2,16 @@
    from SolderMaskCopper02.pas
 
    Modify selected polygon's outline to Board Outline.
+    or copy polygon outline to board outline
 
 B. Miller
 12/05/2020  v0.10  POC
 13/05/2020  v0.11  Allow pre-selection of poly obj. Select object.
-
+12/07/2020  v0.12  Make board outline from selected polygon Outline.
  ..............................................................................}
+
 const
-    bDisplay = false;
+    bDisplay = true ; //false;
 Var
    Board        : IPCB_Board;
    ReportLog    : TStringList;
@@ -45,6 +47,37 @@ Begin
     Polygon.GraphicallyInvalidate;
 End;
 
+Function ModifyBoardOutlineFromPolygonOutline(const Polygon : IPCB_Polygon, var Board : IPCB_Board) : boolean;
+Var
+    BOL   : IPCB_BoardOutline;
+    Layer : TLayer;
+    PNet  : IPCB_Net;
+    I     : Integer;
+
+Begin
+    Layer := Polygon.Layer;
+    ReportLog.Add('Modify Board outline : ' + Board.FileName);
+
+    BOL := Board.BoardOutline;
+    PCBServer.SendMessageToRobots(BOL.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+
+    BOL.PointCount := Polygon.PointCount;
+    For I := 0 To Polygon.PointCount Do
+    Begin
+// if Board.BoardOutline.Segments[I].Kind = ePolySegmentLine then
+// current segment is a straight line.
+       BOL.Segments[I] := Polygon.Segments[I];
+    End;
+
+    BOL.SetState_CopperPourInvalid;
+    BOL.Rebuild;
+    BOL.CopperPourValidate;
+
+    PCBServer.SendMessageToRobots(BOL.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+//  required to get outline area to update!
+    BOL.GraphicallyInvalidate;
+End;
+
 {..............................................................................}
 Procedure ModifyPolygonOutline;
 Var
@@ -74,7 +107,7 @@ Begin
     PCBServer.SystemOptions.PolygonRepour := eAlwaysRepour;
 
 //    Net := FindNetName('GND');
-    
+
     Poly := nil;
 
     if Board.SelectecObjectCount > 0 then
@@ -121,4 +154,80 @@ Begin
             Document.DoFileLoad;
     end;
 End;
+
+{..............................................................................}
+Procedure ModifyBoardOutline;
+Var
+    RepourMode      : TPolygonRepourMode;
+    PolyRegionKind  : TPolyRegionKind;
+    Poly            : IPCB_Polygon;
+    Prim            : IPCB_Primitive;
+
+    FileName     : TPCBString;
+    Document     : IServerDocument;
+    Count        : Integer;
+    I, J         : Integer;
+
+    PolyLayer    : TLayer;
+    MAString     : String;
+
+Begin
+    Board := PCBServer.GetCurrentPCBBoard;
+    If Board = Nil Then Exit;
+
+    BeginHourGlass(crHourGlass);
+    ReportLog    := TStringList.Create;
+
+    //Save the current Polygon repour setting
+    RepourMode := PCBServer.SystemOptions.PolygonRepour;
+// Update so that Polygons always repour - avoids polygon repour yes/no dialog box popping up.
+    PCBServer.SystemOptions.PolygonRepour := eAlwaysRepour;
+
+    Poly := nil;
+
+    if Board.SelectecObjectCount > 0 then
+    begin
+        Prim := Board.SelectecObject(0);
+        if Prim.ObjectId = ePolyObject then
+            Poly := Prim;
+    end;
+
+    if Poly = nil then
+        Poly := Board.GetObjectAtCursor(MkSet(ePolyObject),SignalLayers,'Select polygon to Change Board Outline');
+
+    if Poly <> nil then
+    begin
+        Poly.Selected := true;
+        ReportLog.Add('Original Board Outline area : ' + SqrCoordToUnitString(Board.BoardOutline.AreaSize, 0, 7));
+
+        ModifyBoardOutlineFromPolygonOutline(Poly, Board);
+        ReportLog.Add('Resized Board Outline area : ' + SqrCoordToUnitString(Board.BoardOutline.AreaSize, 0, 7));
+    end;
+
+    Client.SendMessage('PCB:Zoom', 'Action=Redraw', 255, Client.CurrentView);
+
+    //Revert back to previous user polygon repour option.
+    PCBServer.SystemOptions.PolygonRepour := RepourMode;
+
+// test if PCB boardfile not saved.
+    Filename := ExtractFilePath(Board.Filename);
+    if Filename = '' then
+        Filename := SpecialFolder_Temporary;
+
+    FileName := Filename + ChangeFileExt(ExtractFileName(Board.FileName), '.txt');
+
+    ReportLog.SaveToFile(Filename);
+    ReportLog.Free;
+
+    EndHourGlass;
+
+    Document  := Client.OpenDocument('Text', FileName);
+    If (bDisplay) and (Document <> Nil) Then
+    begin
+        Client.ShowDocument(Document);
+        if (Document.GetIsShown <> 0 ) then
+            Document.DoFileLoad;
+    end;
+End;
+
 
