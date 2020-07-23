@@ -1,0 +1,6 @@
+// some comment
+// TypeID, RoomName, X1, Y1, X2, Y2 
+RoomBR, BlockA_Cell115 , 500 , 200 , 510, 220
+RoomBR, BlockA_Cell116 , 500 , 230 , 510, 250
+// 
+RoomXY, BlockA_Cell114 , 500 , 230
