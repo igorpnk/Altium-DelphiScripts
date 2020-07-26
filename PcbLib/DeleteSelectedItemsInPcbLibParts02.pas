@@ -8,8 +8,11 @@
  Created by: Colby Siemer
  Modified by: BL Miller
 
- 24/07/2020  v1.1  fix one object not deleting (the actual user picked obj)
+ 24/07/2020  v1.1  fix one object not deleting (the actual user picked obj
+ 26/07/2020  v1.2  Using temp FP list finally solves problem.  Use create TempComp in middle.
 
+Creating a temporary component is required.
+Selecting it with CurrentLib.SetState_CurrentComponent(TempPcbLibComp) clears all selections.
 
 ..............................................................................}
 const
@@ -26,11 +29,13 @@ Var
     Footprint         : IPCB_LibComponent;
     Text              : IPCB_Text;
     DeleteList        : TObjectList;
+    ThisFPList        : TObjectList;
     I                 : Integer;
     MyPrim            : IPCB_Primitive;
     TempPrim          : IPCB_Primitive;
     HowMany           : String;
     HowManyInt        : Integer;
+    SelCountTot       : integer;
     ButtonSelected    : Integer;
     Remove            : boolean;
 
@@ -51,13 +56,6 @@ Begin
          Exit;
      end;
 
-// Create a temporary component to hold focus while we delete items
-    TempPCBLibComp := PCBServer.CreatePCBLibComp;
-    TempPcbLibComp.Name := FP;
-    CurrentLib.RegisterComponent(TempPCBLibComp);
-
-    CurrentLib.Board.ViewManager_FullUpdate;
-
     DeleteList := TObjectList.Create;
 
 //  Each page of library is a Lib FootPrint: a board with group of primitives.
@@ -68,12 +66,13 @@ Begin
     FootprintIterator.SetState_FilterAll;
     FootprintIterator.AddFilter_IPCB_LayerSet(LayerSetUtils.AllLayers);
 
+    SelCountTot := CurrentLib.Board.SelectedObjectsCount;
+
     Try
         Footprint := FootprintIterator.FirstPCBObject;
         while Footprint <> Nil Do
         begin
             CurrentLib.Board.SelectecObjectCount;
-            currentLib.Board.SelectedObjectsCount;
             Footprint.Name;
 
             GIterator := Footprint.GroupIterator_Create;
@@ -83,7 +82,7 @@ Begin
             MyPrim := GIterator.FirstPCBObject;
             while MyPrim <> Nil Do
             begin
-                if MyPrim.Selected = true then
+                if MyPrim.Selected then
                 begin
                     DeleteList.Add(MyPrim);
                     CurrentLib.Board.SelectedObjects_BeginUpdate;
@@ -100,10 +99,17 @@ Begin
         CurrentLib.LibraryIterator_Destroy(FootprintIterator);
     End;
 
+// Create a temporary component to hold focus while we delete items
+    PCBServer.PreProcess;
+    TempPCBLibComp := PCBServer.CreatePCBLibComp;
+    TempPcbLibComp.Name := FP;
+    CurrentLib.RegisterComponent(TempPCBLibComp);
+    PCBServer.SendMessageToRobots(Nil,c_Broadcast,PCBM_BoardRegisteration,TempPCBLibComp.I_ObjectAddress);
+    PCBServer.PostProcess;
 // focus the temp footprint
-        CurrentLib.SetState_CurrentComponent(TempPcbLibComp);
-        CurrentLib.Board.ViewManager_FullUpdate;
-        CurrentLib.RefreshView;
+    CurrentLib.SetState_CurrentComponent(TempPcbLibComp);
+    CurrentLib.Board.ViewManager_FullUpdate;
+    CurrentLib.RefreshView;
 
     Try
         FootprintIterator := CurrentLib.LibraryIterator_Create;
@@ -113,34 +119,40 @@ Begin
 
         while Footprint <> Nil Do
         begin
+            ThisFPList := TObjectList.Create;
+
             GIterator := Footprint.GroupIterator_Create;
             TempPrim := GIterator.FirstPCBObject;
             while TempPrim <> Nil Do
             begin
-//  Process list and delete items from created list
+//  Process list and make this footprint only list; remove items from global list
                 for I := 0 to (DeleteList.Count - 1) do
                 begin
-                    Remove := false;
                     MyPrim := DeleteList.Items(I);
                     if (MyPrim.I_ObjectAddress = TempPrim.I_ObjectAddress) then
                     begin
-                        Remove := true;
+                        ThisFPList.Add(MyPrim);
+                        DeleteList.Remove(I);
                         break;
                     end;
                 end;
-
                 TempPrim := GIterator.NextPCBObject;
-
-                if (MyPrim <> nil) and (Remove) then
-                begin
-                    PCBServer.PreProcess;
-                    Footprint.RemovePCBObject(MyPrim);
-                    CurrentLib.Board.RemovePCBObject(MyPrim);
-                    PCBServer.PostProcess;
-                    inc(HowmanyInt);
-                end;
             end;
             Footprint.GroupIterator_Destroy(GIterator);
+
+//            Footprint.SetState_PrimitiveLock(false);
+            PCBServer.PreProcess;
+            for I := 0 to (ThisFPList.Count - 1) do
+            begin
+                MyPrim := ThisFPList.Items(I);
+                Footprint.RemovePCBObject(MyPrim);
+//                CurrentLib.Board.RemovePCBObject(MyPrim);
+                PCBServer.SendMessageToRobots(CurrentLib.Board.I_ObjectAddress, c_BroadCast,
+                                              PCBM_BoardRegisteration, MyPrim.I_ObjectAddress);
+                inc(HowmanyInt);
+            end;
+            PCBServer.PostProcess;
+            ThisFPList.Destroy;
 
             Footprint.GraphicallyInvalidate;
             CurrentLib.Board.GraphicallyInvalidate;
@@ -151,8 +163,6 @@ Begin
         CurrentLib.LibraryIterator_Destroy(FootprintIterator);
     End;
 
-    DeleteList.Destroy;
-
 //  Delete Temporary Footprint
     CurrentLib.RemoveComponent(TempPcbLibComp);
 
@@ -161,8 +171,13 @@ Begin
     CurrentLib.Board.GraphicalView_ZoomRedraw;
     CurrentLib.RefreshView;
 
+    if HowManyInt > 0 then CurrentLib.Board.SetState_DocumentHasChanged; // SetDocumentDirty(true);
+
     HowMany := IntToStr(HowManyInt);
-    ShowMessage('Deleted ' + HowMany + ' Items');
+    if HowManyInt = 0 then HowMany := '-NO-';
+    ShowMessage('Deleted ' + HowMany + ' Items ');
+//    ShowMessage('Deleted ' + HowMany + ' Items ' + '  List ' + IntToStr(DeleteList.Count) + '  SelCount' + IntToStr(SelCountTot) );
+    DeleteList.Destroy;
 End;
 {..............................................................................}
 
