@@ -3,15 +3,21 @@
 
 Summary:
 
+Make Region(s) from the solid copper of a Polygon 
+
+A solid polygon is described by poly outline segments but rendered solid as region with arc approx etc.
+Hatched polygon support needs to contour lines & arcs & merge (ClipContourContour).
+
 B. Miller   Ver  Comment
 12/12/2019  0.10 Function copied from RefPlaneRegion 0.25
+07/08/2020  0.11 Updated fn to handle all possible "pieces" & contours (inc. holes) or just outline.
 
  ..............................................................................}
 
 Var
    Board         : IPCB_Board;
 
-function MakeRegionFromPoly (Poly : IPCB_Polygon, Expansion : TCoord, Layer : TLayer) : TObjectList;
+function MakeRegionsFromPoly (Poly : IPCB_Polygon, const Expansion : TCoord, const Layer : TLayer, const RegKind : TRegionKind, const MainContour : boolean) : TObjectList;
 var
     GIterator  : IPCB_GroupIterator;
     Region     : IPCB_Region;
@@ -30,12 +36,22 @@ begin
         GMPC := PcbServer.PCBContourMaker.MakeContour(Region, Expansion, Layer);
 //        GMPC.Count;
         NewRegion := PCBServer.PCBObjectFactory(eRegionObject, eNoDimension, eCreate_Default);
-        NewRegion.GeometricPolygon := GMPC;
-        NewRegion.SetState_Kind(eRegionKind_Copper);
+        PCBServer.SendMessageToRobots(NewRegion.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+
+        if MainContour then
+            NewRegion.SetOutlineContour( GMPC.Contour(0) )
+        else
+            NewRegion.GeometricPolygon := GMPC;
+
+        NewRegion.SetState_Kind(RegKind);
         NewRegion.Layer := Layer;
         if Net <> Nil then NewRegion.Net := Net;
+
         Board.AddPCBObject(NewRegion);
         Result.Add(NewRegion);
+
+        PCBServer.SendMessageToRobots(NewRegion.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+        PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, NewRegion.I_ObjectAddress);
 
         Region := GIterator.NextPCBObject;
     end;
@@ -44,19 +60,6 @@ end;
 
 {..............................................................................}
 
-{
-// alt code path when my MakeRegionFromPoly() did not work.
-if (false) then
-begin    // use builtin Explode process call
-//  help guarantee the UI dialog targets the right object.
-        ConfigPCBFilter('Apply=True|Expr=IsPolygon|Mask=True|Zoom=False|Select=False');
-
-        TempPoly.Selected := true;
-        Client.SendMessage('PCB:GroupPrimitives', 'Action=Explode | Object=Polygon | ContextObject=Polygon', 256, Client.CurrentView);
-
-        ConfigPCBFilter('Clear=True|Expr=All|Zoom=False|Select=False|Mask=False');
-end;
-}
 
 {
 
