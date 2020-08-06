@@ -17,6 +17,7 @@ B. Miller   Ver  Comment
 Var
    Board         : IPCB_Board;
 
+
 function MakeRegionsFromPoly (Poly : IPCB_Polygon, const Expansion : TCoord, const Layer : TLayer, const RegKind : TRegionKind, const MainContour : boolean) : TObjectList;
 var
     GIterator  : IPCB_GroupIterator;
@@ -25,6 +26,8 @@ var
     GMPC       : IPCB_GeometricPolygon;
     Net        : IPCB_Net;
 begin
+   // PCBServer.PCBContourMaker.SetState_ArcResolution(MilsToCoord(ArcResolution));    // control contour arc approx.
+
     Result := TObjectList.Create;
     Net    := Poly.Net;
 //  poly can be composed of multiple regions
