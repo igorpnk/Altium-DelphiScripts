@@ -61,7 +61,7 @@ const
 // for IntLib the table name must be ''
 
     ExDBTable   = '';                       // used if want to change from one named table to another
-    NewDBTable  = '' ;                      // 'RakonSTD_Resistor';     // DB table name
+    NewDBTable  = '' ;                      // 'STD_Resistor';     // DB table name
 
 // Altium appears to be able to find (name match) comp in any table of a DBLib if Use Table name is '' & unticked.
 // set the Use Tablename tickbox, state is only changed if libname matches or search for table succeeds..
