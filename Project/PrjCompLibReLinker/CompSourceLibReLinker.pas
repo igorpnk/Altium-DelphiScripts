@@ -29,6 +29,7 @@ by adding to a common script project.
 24/06/2020  0.14 Add patch fix for DesignItemId blank in SchDoc.
 30/06/2020  0.15 Added DMObjects workaround for broken ISch_Implementation in AD19+
 01/07/2020  0.16 convert version major to int value to test.
+13/08/2020  0.17 Always tick the Comp prop. Library box.
 
 DBLib:
     Component is defined in the table.
@@ -175,9 +176,6 @@ begin
         Doc := Prj.DM_LogicalDocuments(I);
         if Doc.DM_DocumentKind = DocKind then
         begin
-//            if not Doc.DM_DocumentIsLoaded then
-//                Doc.DM_LoadDocument;
-
             LibName := Doc.DM_FullPath;   // Doc.DM_Filename;
             if (DocKind = cDocKind_SchLib) then
                 CompLoc := IntLibMan.FindComponentLibraryPath(LibIdKind, LibName, CompName);
@@ -207,7 +205,7 @@ begin
     Result := nil;
     DK     := Doc.DM_DocumentKind;
     Doc.DM_ComponentCount;
-// SchLib does NOT have UniqueId
+// SchLib does NOT have Component UniqueId
     found := false;
     for I := 0 to (Doc.DM_UniqueComponentCount - 1) do
     begin
@@ -355,13 +353,13 @@ Begin
         SchLibDoc := SchServer.LoadSchDocumentByPath(LibDoc.DM_FullPath);
     if SchLibDoc = Nil Then Exit;
 
-    VerMajor := Version(true).Strings(0);
-    // (StrToInt(VerMajor) >= cMajorVerAD19) and
-    if (LibDoc.DM_UniqueComponentCount = 0) then LibDoc.DM_Compile;
-
 //    workaround for broken fn in AD19 & 20
+    VerMajor := Version(true).Strings(0);
+    if (LibDoc.DM_UniqueComponentCount = 0) then LibDoc.DM_Compile;
     UseDMOMethod := false;
     if (StrToInt(VerMajor) >= cMajorVerAD19) then UseDMOMethod := true;
+
+    Report := TStringList.Create;
 
     If SchLibDoc.ObjectID = eSchLib Then
     begin
@@ -369,8 +367,6 @@ Begin
         Result := true;
     end else
         Iterator := SchLibDoc.SchIterator_Create;
-
-    Report := TStringList.Create;
 
     Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
     Try
@@ -398,6 +394,7 @@ Begin
                 //Component.DatabaseLibraryName := '';
                 Component.DatabaseTableName := '';
                 Component.UseDBTableName := false;
+                
                 if DItemId <> Component.LibReference then DItemId := Component.LibReference;
                 Component.DesignItemId := DItemID;
             end;
@@ -430,6 +427,7 @@ Begin
 
             if SourceCLibName  = '*' then Component.SetState_SourceLibraryName('');
 
+            Component.UseLibraryName := true;
             DItemID   := Component.DesignItemID;               // prim key for DB & we set same as LibRef for IntLib/SchLib.
             CompLibID := Component.LibraryIdentifier;
 
@@ -544,7 +542,6 @@ Begin
     Finally
         If Fix Then
             SchLibDoc.GraphicallyInvalidate;
-               //CurrentSch.Modified := True;
 
         If SchLibDoc.ObjectID = eSchLib Then
             // SchDoc.SchLibIterator_Destroy(Iterator)
