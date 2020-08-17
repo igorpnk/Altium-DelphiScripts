@@ -12,16 +12,18 @@ ReportLayersUsed()
     FP primitive obj totals & mech layer summary table.
     FP copper layers are reported by the highest Pad padstack Mode.
 
- 13/09/2019  BLM  v0.1  Cut&paste out of Footprint-SS-Fix.pas
- 13/09/2019  BLM  v0.11 Holetype was converted as boolean..
-                  v0.12 Set units with const.
-28/09/2019   BLM  v0.13 Add footprint/board origin
-29/09/2019   BLM  v0.14 Add tests for origin & bounding rectangle CoG.
-30/09/2019   BLM  v0.15 Seems lots of info BR & desc was not valid until after some setup
-04/05/2020   BLM  v0.16 Add layers used report.
-07/05/2020        v0.17 use ParameterList to (big!) speed up layer indexing.
-08/05/2020        v0.18 list mech pairs by index , tested in AD19
-09/05/2020        v0.19 Added mechlayer used row at top of table. (not checked in AD19)
+Author BL Miller
+ 13/09/2019  v0.1  Cut&paste out of Footprint-SS-Fix.pas
+ 13/09/2019  v0.11 Holetype was converted as boolean..
+             v0.12 Set units with const.
+28/09/2019   v0.13 Add footprint/board origin
+29/09/2019   v0.14 Add tests for origin & bounding rectangle CoG.
+30/09/2019   v0.15 Seems lots of info BR & desc was not valid until after some setup
+04/05/2020   v0.16 Add layers used report.
+07/05/2020   v0.17 use ParameterList to (big!) speed up layer indexing.
+08/05/2020   v0.18 list mech pairs by index , tested in AD19
+09/05/2020   v0.19 Added mechlayer used row at top of table. (not checked in AD19)
+07/08/2020   v0.20 test around PlanesArray mess.
 
 note: First 4 or 5 statements run in loop seem to prevent false stale info
 
@@ -181,7 +183,7 @@ begin
 
     plLayerIndex := TParameterList.Create;
 
-    for I := 0 to 1001 do
+    for I := 0 to 1024 do
     begin
         LayerUsed[I]   := 0;    // used for 'prims on layer'
         LayerPCount[I] := 0;    // used for 'pairs' & 'prim count' 
@@ -221,6 +223,9 @@ begin
     Rpt.Add('FootPrint                           PadStack| Primitive Counts  | Mechanical Layers                                                                                                             | 33 + ');
     Rpt.Add('Name                                    |PS |Pad|Reg|Trk|Txt|Fil| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10| 11| 12| 13| 14| 15| 16| 17| 18| 19| 20| 21| 22| 23| 24| 25| 26| 27| 28| 29| 30| 31| 32|...');
     // Rpt.Add('');
+
+
+// IPCB_Board.MechanicalLayerIterator.AddFilter_MechanicalLayers;   // IPCB_layerIterator
 
 // report mech pairs
 if not LegacyMLS then
@@ -264,7 +269,7 @@ end;
     Rpt.Add('                       mechanical (u)sed -->                    |' + LayerRow);
 
 
-    for I := 0 to 1001 do
+    for I := 0 to 1024 do
     begin
         LayerUsed[I]   := 0;    // used for 'prims on layer'
         LayerPCount[I] := 0;    // used for 'prim count' 
@@ -416,7 +421,7 @@ begin
     // For each page of library is a footprint
     FPIterator := CurrentLib.LibraryIterator_Create;
     FPIterator.SetState_FilterAll;
-    FPIterator.AddFilter_LayerSet(AllLayers);
+    FPIterator.AddFilter_IPCB_LayerSet(LayerSetUtils.AllLayers);
 
     BadFPList := TStringList.Create;
     Rpt       := TStringList.Create;
@@ -432,6 +437,7 @@ begin
 // suspect it changes the Pad.Desc text as well
 
         CurrentLib.SetBoardToComponentByName(Footprint.Name) ;   // fn returns boolean
+//  this below line unselects selected objects;
         CurrentLib.SetState_CurrentComponent (Footprint);
         CurrentLib.Board.ViewManager_FullUpdate;
         CurrentLib.RefreshView;
@@ -476,7 +482,7 @@ begin
             Inc(NoOfPrims);
             if Prim.GetState_ObjectId = ePadObject then
             begin
-                Pad := Handle;
+                Pad := Prim;
                 Layer := Pad.Layer;
                 // Pad.HoleType := eRoundHole;
                 // ePadMode_LocalStack;       // top-mid-bottom stack
@@ -525,24 +531,23 @@ begin
                 Rpt.Add('Plane Style Valid             CCSV : ' + GetCacheState(PadCache.PlaneConnectionStyleValid) );
                 Rpt.Add('Plane Connection Style        CCS  : ' + GetPlaneConnectionStyle(PadCache.PlaneConnectionStyle) );
                 Rpt.Add('Plane Connect Style for Layer      : ' + GetPlaneConnectionStyle(Pad.PlaneConnectionStyleForLayer(Layer)) );
-                                                         
+
 
         // Transfer Pad.Cache's Planes field (Word type) to the Planes variable (TPlanesConnectArray type).
-                PlanesArray := PadCache.Planes;
                 CPL := '';
-                for L := kMinInternalPlane To kMaxInternalPlane Do
-                begin
-            // Planes is a TPlanesConnectArray and each internal plane has a boolean value.
-            // at the moment PlanesArray[L] is always true which is not TRUE!
-                if (PlanesArray[L] = True) Then
-                    CPL := CPL + '1'
-                else
-                    CPL := CPL + '0';
-                end;
-//        CPL_Hex := IntegerToHexString(CPL);
-
                 if (PadCache.PlanesValid <> eCacheInvalid) Then
                 begin
+                    PlanesArray := PadCache.Planes;
+                    for L := kMinInternalPlane To kMaxInternalPlane Do
+                    begin
+            // Planes is a TPlanesConnectArray and each internal plane has a boolean value.
+            // at the moment PlanesArray[L] is always true which is not TRUE!
+                    if (PlanesArray[L] = True) Then
+                        CPL := CPL + '1'
+                    else
+                        CPL := CPL + '0';
+                    end;
+//        CPL_Hex := IntegerToHexString(CPL);
                     Rpt.Add('   Power Planes Connection Code (binary): ' + CPL );
                 end else
                 begin
