@@ -29,6 +29,7 @@ Author BL Miller
 18/08/2020  v0.22  Add MechLayer Kind & legend at end of report.
 18/08/2020  v0.23  Added mechlayer names & kinds summary for enabled layers. Added enabled & used status.
 18/08/2020  v0.24  Support PcbDoc; Disable kind legend (redundant repeat info).
+19/08/2020  v0.25  Fix pad stack display for non stack FPs.
 
 note: First 4 or 5 statements run in the top of main loop seem to prevent false stale info
 
@@ -398,6 +399,7 @@ begin
         if ansipos('X', PadStack) > 0 then PadStack := 'X';   // external full stack
         if ansipos('L', PadStack) > 0 then PadStack := 'L';   // local stack
         if ansipos('S', PadStack) > 0 then PadStack := 'S';   // simple
+        if PadStack = '' then PadStack := ' ';
 
         if IsLib then
         begin
