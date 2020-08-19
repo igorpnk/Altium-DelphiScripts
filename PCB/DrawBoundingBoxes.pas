@@ -1,6 +1,6 @@
 {  DrawBoundingBoxes.pas
 
-   With pre-selected component in PcbDoc or focused LibComponent "board", the script will:
+   With pre-selected component or primitive in PcbDoc or focused LibComponent "board", the script will:
    - draw 4 or 5 bounding boxes
 
    Can select boxlines by Union in PcbDoc.
@@ -94,8 +94,9 @@ begin
     UIndex := GetHashID_ForString(GetWorkSpace.DM_GenerateUniqueID);
 
 // PcbLib component is a group of free primitives on a board.
-    if not IsLib then
-        if Prim.ObjectId <> eComponentObject then exit;
+//    if not IsLib then
+//        if Prim.ObjectId <> eComponentObject then exit;
+
 
 // Bounding Rectangles
 // PcbDoc: 3 of these are same; NoNameComment Painting Selection
@@ -104,6 +105,7 @@ begin
     BRect := Prim.BoundingRectangle;
     DrawBox(Board, BRect, UIndex, 'BRect');
     if not IsLib then
+    if Prim.ObjectId = eComponentObject then
     begin
 //        BRect := RectToCoordRect(Prim.BoundingRectangleNoNameComment);
         BRect := Prim.BoundingRectangleNoNameComment;
