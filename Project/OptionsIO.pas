@@ -89,11 +89,17 @@ const
 //    cNameOfServer = 'LibraryInterface';
 
 // LibraryBrowser.INI
-
+{
     cNameOfServer = 'IntegratedLibrary';            //  TLibraryBrowserServerModule
     cSectionName  = 'Browser Settings';             // all working
     cSectionNamesExport = 'Browser Settings|Component Browser|Loaded Libraries|General';
     cSectionNamesImport = 'Browser Settings';
+}
+// WSM VersionControl
+
+    cNameOfServer = 'VersionControl';
+    cSectionNamesExport = 'DesignVaults|LocalHistory|Providers|StorageManager|SVN|SVNDbLib';
+    cSectionNamesImport = '';
 
 // WorkSpace
 {
