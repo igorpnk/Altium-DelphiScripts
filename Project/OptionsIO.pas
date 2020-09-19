@@ -145,6 +145,7 @@ Var
     OpenDialog : TOpenDialog;
     Reader     : IoptionsReader;
     Writer     : IOptionsWriter;
+    IniFile    : TMemIniFile;            // do NOT use TIniFile for READING as strips quotes at each end!
     ASModule   : IServerModule;
     AView      : IServerView;
     NView      : IServerView;
@@ -241,6 +242,7 @@ Var
     SaveDialog : TSaveDialog;
     Reader     : IOptionsReader;      // TRegistryReader
     Reader2    : IOptionsReader;
+    IniFile    : TIniFile;            // do NOT use TIniFile for READING as strips quotes at each end!
     SectName   : WideString;
     I, J       : integer;
     DSOptions : IDocumentOptionsSet;
@@ -328,87 +330,6 @@ Begin
     end;
 end;
 
-procedure ExportIniOptionFile;
-Var
-//    FileName   : String;
-    SectNames  : TStringList;
-    SaveDialog : TSaveDialog;
-//    Reader     : IOptionsReader;
-    ReadIni    : TIniFile;
-    I          : integer;
-
-Begin
-    ReadIni := TIniFile.Create(SpecialFolder_ExportPreferences + IniFileName);
-
-    If ReadIni = Nil Then
-    begin
-        ShowMessage('no options found ');
-        Exit;
-    end;
-
-    SaveDialog        := TSaveDialog.Create(Application);
-    SaveDialog.Title  := 'Export ' + cNameOfServer + ' Options *.ini file';
-    SaveDialog.Filter := 'INI file (*.ini)|*.ini';
-    FileName := cNameOfServer + '_Options.ini';  // ExtractFilePath(Board.FileName);
-    SaveDialog.FileName := FileName;            // ChangeFileExt(FileName, '');
-
-    Flag := SaveDialog.Execute;
-    if (Flag = 0) then exit;
-
-    // Get file & set extension
-    FileName := SaveDialog.FileName;
-    FileName := ChangeFileExt(FileName, '.ini');
-    IniFile := TIniFile.Create(FileName);
-
-    Report   := TStringList.Create;
-    SectKeys := TStringList.Create;
-    SectKeys.Delimiter := #13;
-    SectKeys.StrictDelimiter := true;
-//    SectKeys.NameValueSeparator := '=';
-
-    SectNames := TStringList.Create;
-
-    Filename := '';
-    ReportDoc := nil;
-
-    ReadIni.ReadSections(SectKeys);
-
-//    if Reader.SectionExists(cSectionName) then
-//    begin
-//        AValue := Reader.ReadSection(cSectionName);
-//        SectKeys.DelimitedText := AValue;
-
-//        Report.Add(cNameOfServer);
-        Report.Add(cSectionName + '  option count : ' + IntToStr(SectKeys.Count));
-
-        for I := 0 to (SectKeys.Count - 1) do
-        begin
-            ReadIni.ReadSection(SectKeys.Strings(I), SectNames);
-            IniFile.WriteString(SectKeys.Strings(I), SectNames);
-            Report.Add(IntToStr(I) + ' ' + PadRight(SectKeys.Strings(I), 45) + ' = ' + AValue);
-        end;
-
-        Filename := SpecialFolder_TemporarySlash + cNameOfServer + '-Options-Report.txt';
-        Report.SaveToFile(Filename);
-
-//    end else
-//    begin
-//        ShowMessage('section not found');
-//    end;
-
-    SectKeys.Free;
-    Report.Free;
-    IniFile.Free;
-
-    if FileName <> '' then
-        ReportDoc := Client.OpenDocument('Text', FileName);
-    If ReportDoc <> Nil Then
-    begin
-        Client.ShowDocument(ReportDoc);
-        if (ReportDoc.GetIsShown <> 0 ) then
-            ReportDoc.DoFileLoad;
-    end;
-end;
 
 function ServerOptionReadBool(const NOS : WideString, const SettingName : WideString;) : boolean;
 Var
