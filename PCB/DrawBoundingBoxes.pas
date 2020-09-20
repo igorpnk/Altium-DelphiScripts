@@ -10,6 +10,7 @@ BLM
 05/06/2020  v0.10 POC
 06/06/2020  v0.11 Added text labels & layer enable stuff & support for PcbLib.
 19/09/2020  v0.12 Add report with dimensions. Make the output mech layer visible
+21/09/2020  v0.13 Add (x,y) of the primitive.
 
 Button RunScriptText
 Text=Var B,P,U;Begin    end;
@@ -73,10 +74,12 @@ end;
 
 procedure DrawBBoxes;
 var
-    PcbLib  : IPCB_Library;
-    ML      : TLayer;
-    MLayer  : IPCB_MechanicalLayer;
-    Prim    : IPCB_Primitive;
+    PcbLib    : IPCB_Library;
+    ML        : TLayer;
+    MLayer    : IPCB_MechanicalLayer;
+    Prim      : IPCB_Primitive;
+    PCentre   : TPoint;
+    sPCentre  : WideString;
     FPName    : WideString;
     FPPattern : WideString;
     UIndex    : integer;
@@ -125,7 +128,7 @@ begin
 
     UIndex := GetHashID_ForString(GetWorkSpace.DM_GenerateUniqueID);
 
-    FPName := '';
+    FPName := ''; FPPattern := ''; sPCentre := '';
     if IsLib then
     begin
         FPName    := Prim.Name;
@@ -135,10 +138,17 @@ begin
         if Prim.ObjectId = eComponentObject then
         begin
             FPName    := Prim.Name.Text;
-            FPPattern := Prim.Pattern;
+            FPPattern := ' | '+ Prim.Pattern;
         end;
     end;
-    FPName := Prim.ObjectIdString + ' ' + FPName + ' ' + FPPattern;
+    if InSet(Prim.ObjectId, MkSet(eComponentObject, eNetObject, ePadObject, eViaObject, ePolyObject, eCoordinateObject, eDimensionObject) ) then
+    begin
+        PCentre := Point(Prim.X, Prim.Y);
+        sPCentre := ' | Primitive X = ' + PadRight(CoordUnitToString(PCentre.X-BOrigin.X, BUnits),10)
+                              + ' Y = ' + PadRight(CoordUnitToString(Pcentre.Y-Borigin.Y, BUnits),10);
+    end;
+
+    FPName := Prim.ObjectIdString + ' | ' + FPName + FPPattern + sPCentre;
     Report.Add(FPName);
 
 // Bounding Rectangles
