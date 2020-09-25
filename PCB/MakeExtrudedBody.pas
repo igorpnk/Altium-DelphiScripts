@@ -6,14 +6,16 @@
   Polygon (solid) child regions are used not the polyline outline.
 
 25/09/2020 v0.01 POC working.
+26/09/2020 v0.10 use PCB current layer for new model if is Mechanical else use defined const iMechLayer
 
 Units for IPCB_Model are MickeyMouse(TM)
 
 }
 
 Const
-    OutlineExpansion     = 0.0;  // 30 mils from edge.
-    ArcResolution        = 0.02; // mils : impacts number of edges etc..
+    iMechLayer           = 13;   // Mechanical Layer 13 == 13  NOT USED
+    OutlineExpansion     = 0.0;  // 0 mils from edge.
+    ArcResolution        = 0.1; // mils : impacts number of edges etc..
 
 Var
    WSM             : IWorkSpace;
@@ -176,7 +178,8 @@ Var
     GMPC1          : IPCB_GeometricPolygon;
     Expansion      : TCoord;
     Layer          : TLayer;
-    MCLayer        : TLayer;
+    ML             : TLayer;
+    MLayer         : IPCB_MechanicalLayer;
     I, J, K        : Integer;
     MaskObjList    : TObjectList;
     UnionIndex     : integer;
@@ -197,12 +200,13 @@ begin
     ReportLog   := TStringList.Create;
     MaskObjList := TObjectList.Create;
 
-    FYI := '';
-    StrokeFontLines := nil;
-    Layer   := Board.CurrentLayer;
+// code for using const defined layer   hint: make Layer := ML !!
+    ML     := LayerUtils.MechanicalLayer(iMechLayer);
+    MLayer := Board.LayerStack_V7.LayerObject_V7[ML];
+    Layer  := Board.CurrentLayer;
 
-    MCLayer := Layer;
-    if Layer >  eMechanical16 then MCLayer := eMechanical16;
+    if not LayerUtils.IsMechanicalLayer((Layer)) then
+        Layer := ML;
 
    //   make a primitive object list & then loop & test & generate contours.
     MaskObjList.Clear;
@@ -241,6 +245,7 @@ begin
 // if shape has multiple contours ask if only biggest area?
         for I := 0 to (GPOL.Count - 1) do
         begin
+            FYI := '';
             GMPC1 := GPOL.Items(I);
             if GMPC1.Count > 1 then FYI := 'One outline shape has 2 or more contours. ';
 
@@ -253,7 +258,7 @@ begin
                 dConfirm := ConfirmNoYesWithCaption('Shape Has Holes ','Just keep the outside shape ? ');
 
             if (Shape = eComponentBodyObject) then
-                CompBody := AddExtrudedBodyToBoard(GMPC1, eMechanical13, UnionIndex, dConfirm);
+                CompBody := AddExtrudedBodyToBoard(GMPC1, Layer, UnionIndex, dConfirm);
 
             ReportLog.Add(PadRight(IntToStr(I),2) + '  :  ' + IntTostr(GMPC1.Count) );
         end;
