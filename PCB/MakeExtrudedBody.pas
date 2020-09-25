@@ -5,7 +5,7 @@
   Create ComponentBody Extruded model(s) from selected region or polygon
   Polygon (solid) child regions are used not the polyline outline.
 
-28/09/2020 v0.01 POC working.
+25/09/2020 v0.01 POC working.
 
 Units for IPCB_Model are MickeyMouse(TM)
 
