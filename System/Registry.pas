@@ -12,6 +12,7 @@ BL Miller
 04/09/2020  v0.10  Toogle user boolean in Registry inside AD section.
 16/10/2020  v0.11  Demo toogle of Altium Portal auto login
 16/10/2020  v0.12  try to add ReadSectionKeys()
+16/10/2020  v0.13  refactor errors.. Might help to read/write to the full correct path..
 
 
 // Software\Altium\Altium Designer {hhhhhhhh-hhhh-hhhh-hhhh-hhhhhhhhhhhh}
@@ -32,7 +33,7 @@ const
 
 var
     bSelectText    : boolean;
-    bOldTextValue  : boolean;
+    OldTextValue   : WideString;
     bSuccess       : boolean;
     SectKeyList    : TStringlist;
 
@@ -43,9 +44,11 @@ Begin
     Result := false;
     Registry := TRegistry.Create;
     Try
-        Registry.OpenKey(SKey, true);
+        Registry.OpenKey(SKey, false);
         if Registry.ValueExists(IKey) then
             Result := Registry.ReadBool(IKey);
+
+        Registry.GetDataType(IKey);           //TRegDataType
         Registry.CloseKey;
 
     Finally
@@ -80,6 +83,7 @@ Begin
     Result := '';
     Registry := TRegistry.Create;
     Try
+        Registry.OpenKey(SKey, false);
         if Registry.ValueExists(IKey) then
             Result := Registry.ReadString(IKey);
         Registry.CloseKey;
@@ -102,7 +106,6 @@ Begin
             Registry.WriteString(IKey, SVal);
         end;
         Registry.CloseKey;
-
     Finally
         Registry.Free;
     End;
@@ -121,7 +124,7 @@ Begin
     Registry.RootKeyName;
 
     Try
-        Registry.OpenKeyReadOnly('\' + SpecialKey_SoftwareAltiumApp + cRegistrySubPath + SKey );
+        Registry.OpenKeyReadOnly( SKey );
         Registry.HasSubKeys;
         Registry.GetKeyNames( Result );           // DNW !!
         Registry.Closekey;
@@ -131,20 +134,30 @@ Begin
     End;
 end;
 
-procedure ToggleBoolean;
+procedure ToggleStringBoolean;
+Var
+    SectKey  : WideString;
+    KeyValue : WideString;
 begin
+    SectKey :=  '\' + SpecialKey_SoftwareAltiumApp + cRegistrySubPath + csSectKey1;
 
-    SectKeyList := RegistryReadSectKeys(csSectKey1);
+    SectKeyList := RegistryReadSectKeys(SectKey);
 
-    bSelectText := RegistryReadBool(csSectKey1, csItemKey1);
-// do stuff.
 
+    OldTextValue := RegistryReadString(SectKey, csItemKey1);
+    if OldTextValue = '0' then bSelectText := false;
+    if OldTextValue = '1' then bSelectText := true;
+
+// toggle
     bSelectText := not bSelectText;
-    bOldTextValue := RegistryReadBool(csSectKey1, csItemKey1);
-    bSuccess := RegistryWriteBool(csSectKey1, csItemKey1, bSelectText);
-    bSelectText := RegistryReadBool(csSectKey1, csItemKey1);
+    KeyValue := '0';
+    if bSelectText then KeyValue := '1';
 
-    ShowMessage(csItemKey1 + ' set to : ' + BoolToStr(bSelectText, true) + '  success  ' + BoolToStr(bSuccess, true));
+    bSuccess := RegistryWriteString(SectKey, csItemKey1, KeyValue);
+    KeyValue := RegistryReadString(SectKey, csItemKey1);
+    bSuccess := bSuccess and ( KeyValue <> OldTextValue);
+
+    ShowMessage(csItemKey1 + ' set to : ' + KeyValue + '   success  ' + BoolToStr(bSuccess, true));
 
 end;
 
