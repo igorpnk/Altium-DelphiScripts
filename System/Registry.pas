@@ -11,6 +11,7 @@
 BL Miller
 04/09/2020  v0.10  Toogle user boolean in Registry inside AD section.
 16/10/2020  v0.11  Demo toogle of Altium Portal auto login
+16/10/2020  v0.12  try to add ReadSectionKeys()
 
 
 // Software\Altium\Altium Designer {hhhhhhhh-hhhh-hhhh-hhhh-hhhhhhhhhhhh}
@@ -20,12 +21,12 @@ BL Miller
 }
 
 const
-    cRegistrySubPath = '\DesignExplorer\Preferences\';
+    cRegistrySubPath = '\DesignExplorer\Preferences';
 
 //    csSectKey1 = 'Text Editors\Text Preferences';
 //    csItemKey1 = 'SelectFoundText';
 
-    csSectKey1 = 'AltiumPortal\Account';
+    csSectKey1 = '\AltiumPortal\Account';
     csItemKey1 = 'SigninAtStartup';
 
 
@@ -33,6 +34,7 @@ var
     bSelectText    : boolean;
     bOldTextValue  : boolean;
     bSuccess       : boolean;
+    SectKeyList    : TStringlist;
 
 function RegistryReadBool(const SKey : WideString, const IKey : Widestring) : boolean;
 var
@@ -42,7 +44,6 @@ Begin
     Registry := TRegistry.Create;
     Try
         Registry.OpenKey(SKey, true);
-
         if Registry.ValueExists(IKey) then
             Result := Registry.ReadBool(IKey);
         Registry.CloseKey;
@@ -61,10 +62,12 @@ Begin
     Try
         Registry.OpenKey(SKey, true);
         if Registry.ValueExists(IKey) then
-            Result := Registry.ReadBool(IKey);
-        Registry.WriteBool(IKey, SVal);
+        begin
+            Registry.WriteBool(IKey, SVal);
+            Result := (SVal = Registry.ReadBool(IKey) );
+        end;
         Registry.CloseKey;
-      
+
     Finally
         Registry.Free;
     End;
@@ -77,12 +80,9 @@ Begin
     Result := '';
     Registry := TRegistry.Create;
     Try
-        Registry.OpenKey(SKey, true);
-
         if Registry.ValueExists(IKey) then
             Result := Registry.ReadString(IKey);
         Registry.CloseKey;
-
     Finally
         Registry.Free;
     End;
@@ -97,19 +97,44 @@ Begin
     Try
         Registry.OpenKey(SKey, true);
         if Registry.ValueExists(IKey) then
+        begin
             Result := true; // Registry.ReadString(IKey);
-        Registry.WriteString(IKey, SVal);
+            Registry.WriteString(IKey, SVal);
+        end;
         Registry.CloseKey;
-      
+
     Finally
         Registry.Free;
     End;
 End;
 
+function RegistryReadSectKeys(const SKey : WideString) : TStringList;
+var
+    Registry: TRegistry;
+    Keys : WideString;
+Begin
+    Result := TStringList.Create;
+//    Result.Delimiter := '|';
+
+    Registry := TRegistry.Create;
+    Registry.RootKey;
+    Registry.RootKeyName;
+
+    Try
+        Registry.OpenKeyReadOnly('\' + SpecialKey_SoftwareAltiumApp + cRegistrySubPath + SKey );
+        Registry.HasSubKeys;
+        Registry.GetKeyNames( Result );           // DNW !!
+        Registry.Closekey;
+
+    Finally
+        Registry.Free;
+    End;
+end;
+
 procedure ToggleBoolean;
 begin
-    SpecialKey_SoftwareAltiumApp;
-    SpecialKey_SoftwareAltiumAppDXP;
+
+    SectKeyList := RegistryReadSectKeys(csSectKey1);
 
     bSelectText := RegistryReadBool(csSectKey1, csItemKey1);
 // do stuff.
