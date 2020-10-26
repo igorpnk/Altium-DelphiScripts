@@ -6,12 +6,15 @@
 
 BL Miller
 26/10/2020  v0.10  POC list Altium Install registry entries..
+            v0.11  Added some install Preferences to report
 
 TBD:
   check in Win64 environment.
 
 //                                            vv  SpecialKey_SoftwareAltiumApp  vv
 // HKEY_LOCAL_MACHINE/Software/Altium/Builds/Altium Designer {Fxxxxxxx-xxxxxxxxxxxxx}/*items
+// HKEY_CURRENT_USER/Software/Altium/Altium Designer {Fxxxxxxx-xxxxxxxxxxxxx}/DesignExplorer/Preferences
+
 }
 
 const
@@ -24,10 +27,15 @@ const
     HKEY_CURRENT_CONFIG   = $80000005;
     HKEY_DYN_DATA         = $80000006;
 
-    cRegistrySubPath = '\Software\Altium\Builds';
+    cRegistrySubPath  = '\Software\Altium\Builds';        // Machine installs
+    cRegistrySubPath2 = '\Software\Altium';               // User prefs
+    cRegistrySubPath3 = '\DesignExplorer\Preferences';    // User prefs
 
-// paralist of ItemKeys to report.
-    csItemKeys = 'Application|Build|Display Name|ProgramsInstallPath|FullBuild|ReleaseDate|DocumentsInstallPath|Security|UniqueID|Version|Win64';
+// paralist of ItemKeys to report from Software\Altium\Builds\SpecialKey\..
+    csItemKeys  = 'Application|Build|Display Name|ProgramsInstallPath|FullBuild|ReleaseDate|DocumentsInstallPath|Security|UniqueID|Version|Win64';
+// ..Software\Altium\\SpecialKey\DesignExplorer\Preferences\
+    csItemKeys2 = 'WorkspaceManager\Workspace Preferences\Template Path|PcbDrawing\PcbDrawing\DocumentTemplatesLocation|IntegratedLibrary\Add Remove\InstalledRelativePath'
+                + '|AltiumPortal\Account\Username';
 
 var
     Registry         : TRegistry;
@@ -42,10 +50,20 @@ var
 function RegistryReadString(const SKey : WideString, const IKey : Widestring) : WideString; forward;
 function RegistryReadSectKeys(const SKey : WideString) : TStringList;                       forward;
 
+procedure ItemPathToSection (var SPath, var KPath : WideString);
+var
+    pos : integer;
+begin
+    SPath := SPath + '\' + ExtractFilePath(KPath);
+    SPath := RemovePathSeparator(SPath);
+    KPath := ExtractFileName(KPath);
+end;
+
 procedure ListTheInstalls;
 Var
     SectKey    : WideString;
     ItemKey    : WideSting;
+    ItemKey2   : WideSting;
     KeyValue   : WideString;
     S, I       : integer;
 
@@ -69,19 +87,45 @@ begin
     for S := 0 to (SectKeyList.Count - 1) do
     begin
         SectKey := SectkeyList.Strings(S);
-        Report.Add('Section : ' + SectKey);
+        Report.Add('Section : ' + IntToStr(S) + ' ' + SectKey);
         for I := 0 to (ItemKeyList.Count - 1) do
         begin
             ItemKey := ItemKeyList.Strings(I);
             RegDataInfo := rdString;
 //   don't forget the damn separator '\'
             KeyValue := RegistryReadString(cRegistrySubPath + '\' + SectKey, ItemKey);
-            Report.Add(PadRight(ItemKey,20) + ' = ' + PadRight(KeyValue,50) + ' datatype : ' +IntToStr(RegDataInfo) );
+            Report.Add(PadRight(IntToStr(S) + '.' + IntToStr(I),4) + ' ' + PadRight(ItemKey,30) + ' = ' + PadRight(KeyValue,50) + ' datatype : ' +IntToStr(RegDataInfo) );
+        end;
+        Report.Add('');
+    end;
+
+    ItemKeyList.Clear;
+    ItemKeyList.DelimitedText := csItemKeys2;
+
+    Registry.RootKey := HKEY_CURRENT_USER;
+
+    for S := 0 to (SectKeyList.Count - 1) do
+    begin
+        SectKey := SectkeyList.Strings(S);
+        Report.Add('Section : ' + IntToStr(S) + ' ' + SectKey);
+        for I := 0 to (ItemKeyList.Count - 1) do
+        begin
+            ItemKey := ItemKeyList.Strings(I);
+            RegDataInfo := rdString;
+//   don't forget the damn separator '\'
+            SectKey := cRegistrySubPath2 + '\' + SectkeyList.Strings(S) + cRegistrySubPath3;
+            ItemKey2 := ItemKey;
+            ItemPathToSection (SectKey, ItemKey2);
+            KeyValue := RegistryReadString(SectKey, ItemKey2);
+
+            Report.Add(PadRight(IntToStr(S) + '.' + IntToStr(I),4) + ' ' +  ExtractFilePath(ItemKey));
+            Report.Add(PadRight(IntToStr(S) + '.' + IntToStr(I),4) + ' ' + PadRight(ItemKey2,30) + ' = ' + PadRight(KeyValue,50) + ' datatype : ' +IntToStr(RegDataInfo) );
         end;
         Report.Add('');
     end;
 
     ItemKeyList.Free;
+
     SectKeyList.Delimiter := #13;
     SectKeyList.Insert(0,'List of installs : ');
 //    ShowMessage(SectKeyList.DelimitedText);
