@@ -7,9 +7,13 @@
 BL Miller
 26/10/2020  v0.10  POC list Altium Install registry entries..
             v0.11  Added some install Preferences to report
+27/10/2020  v0.12  Use Special folder if only project is Free Documents & blank path. CurrentDir is not reliable RW path.
+
 
 TBD:
-  check in Win64 environment.
+  No 32 - 64 bit cross support..
+  If run from AD17 then ONLY 32bit registry is checked.
+  If run from AD18+ then only 64bit installs are found.
 
 //                                            vv  SpecialKey_SoftwareAltiumApp  vv
 // HKEY_LOCAL_MACHINE/Software/Altium/Builds/Altium Designer {Fxxxxxxx-xxxxxxxxxxxxx}/*items
@@ -135,8 +139,8 @@ begin
 
     Project := GetWorkSpace.DM_FocusedProject;
     FilePath := ExtractFilePath(Project.DM_ProjectFullPath);
-    if FilePath = 'FreeDocuments' then
-        FilePath := GetCurrentDir;
+    if (Project.DM_ProjectFullPath = 'FreeDocuments') or (FilePath = '') then
+        FilePath :=  SpecialFolder_AllUserDocuments;   // GetCurrentDir;
 
     FilePath := FilePath + '\AD_Installs_Report.Txt';
     Report.Insert(0, 'Report Altium Installs in Registry');
