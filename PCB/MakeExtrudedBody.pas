@@ -2,20 +2,30 @@
 
   for Pcbdoc.
 
-  Create ComponentBody Extruded model(s) from selected region or polygon
+  Create ComponentBody Extruded model(s) or just Regions from selected region or polygon
   Polygon (solid) child regions are used not the polyline outline.
 
 25/09/2020 v0.01 POC working.
 26/09/2020 v0.10 use PCB current layer for new model if is Mechanical else use defined const iMechLayer
+06/11/2020 v0.20 added support for output Regions onto any current layer
 
 Units for IPCB_Model are MickeyMouse(TM)
+
+Note this script :-
+- does not handle intersecting/overlapping/merging of expanded shapes.
+- can make regions of hatched polygons but NOT merged.
 
 }
 
 Const
-    iMechLayer           = 13;   // Mechanical Layer 13 == 13  NOT USED
+    iMechLayer           = 13;   // Mechanical Layer 13 == 13  used for Comp Body if current layer <> type mech-layer
     OutlineExpansion     = 0.0;  // 0 mils from edge.
-    ArcResolution        = 0.1; // mils : impacts number of edges etc..
+    ArcResolution        = 0.02; // mils : impacts number of edges etc..
+
+    olTrack  = 1;
+    olRegion = 2;
+    olBody   = 3;
+    olRoom   = 4;
 
 Var
    WSM             : IWorkSpace;
@@ -93,12 +103,38 @@ begin
     ReportLog.Add('Added New Extruded Body on Layer ' + Layer2String(Result.Layer) + ' kind : ' + IntToStr(Result.Kind) + '  area ' + SqrCoordToUnitString(Result.Area , eMM, 6) );
 end;
 
+function AddRegionToBoard(GPC : IPCB_GeometricPolygon, Net : IPCB_Net, const Layer : TLayer, const UIndex : integer, const MainContour : boolean) : IPCB_Region;
+var
+    GPCVL  : Pgpc_vertex_list;
+begin
+    Result := PCBServer.PCBObjectFactory(eRegionObject, eNoDimension, eCreate_Default);
+    PCBServer.SendMessageToRobots(Result.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+
+    if MainContour then
+        Result.SetOutlineContour( GPC.Contour(0) )
+    else
+        Result.GeometricPolygon := GPC;
+
+    Result.SetState_Kind(eRegionKind_Copper);
+    Result.Layer := Layer;
+    Result.Net   := Net;
+    Result.UnionIndex := UIndex;
+
+    Board.AddPCBObject(Result);
+    PCBServer.SendMessageToRobots(Result.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+    PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Result.I_ObjectAddress);
+
+    Result.Selected := true;
+    ReportLog.Add('Added New Region on Layer ' + Layer2String(Result.Layer) + ' kind : ' + IntToStr(Result.Kind) + '  area ' + SqrCoordToUnitString(Result.Area , eMM, 6) ); // + '  net : ' + Result.Net.Name);
+end;
+
 function MakeContourShapes(MaskObjList : TObjectList, Operation : TSetOperation, Layer : TLayer, Expansion : Tcoord) : TInterfaceList;
 var
     GMPC1         : IPCB_GeometricPolygon;
-    GMPC2         : IPCB_GeometricPolygon;
+//    GMPC2         : IPCB_GeometricPolygon;
     RegionVL      : Pgpc_vertex_list;
     Primitive     : IPCB_Primitive;
+    TrkPrim       : IPCB_Primitive;
     GIterator     : IPCB_GroupIterator;
     Region        : IPCB_Region;
     Fill          : IPCB_Fill;
@@ -107,8 +143,8 @@ var
 
 begin
     Result := TInterfaceList.Create;  // GPOL needed for non PCB objs & batch contour fn
-    GMPC1 := nil;
-    GMPC2 := nil;
+
+    GMPC1 := PcbServer.PCBGeometricPolygonFactory;
 
 //    PcbServer.PCBContourMaker.ArcResolution := MilsToCoord(0.5); // very strange result if > 1
     PCBServer.PCBContourMaker.SetState_ArcResolution(MilsToCoord(ArcResolution));
@@ -133,9 +169,9 @@ begin
                 ePolyObject :
                 begin
                     Polygon := Primitive;
+                    GIterator := Polygon.GroupIterator_Create;
                     if (Polygon.PolyHatchStyle = ePolySolid) and (Polygon.InBoard ) then  //  and Region.InComponent
                     begin
-                        GIterator := Polygon.GroupIterator_Create;
                         Region    := GIterator.FirstPCBObject;
                         while Region <> nil do
                         begin
@@ -143,9 +179,22 @@ begin
                             Result.Add(GMPC1);
                             Region := GIterator.NextPCBObject;
                         end;
-                        Polygon.GroupIterator_Destroy(GIterator);
 //                        GMPC1 := PcbServer.PCBContourMaker.MakeContour(Polygon, Expansion, Layer);
                     end;
+                    if (Polygon.PolyHatchStyle <> ePolyNoHatch) and (Polygon.PolyHatchStyle <> ePolySolid) and (Polygon.InBoard ) then  //  and Region.InComponent
+                    begin
+                        TrkPrim     := GIterator.FirstPCBObject;
+                        while TrkPrim <> nil do    // track or arc
+                        begin
+                            if (TrkPrim.ObjectId = eTrackObject) or (trkPrim.ObjectId = eArcObject) then
+                            begin
+                                GMPC1 := PcbServer.PCBContourMaker.MakeContour(TrkPrim, 0, Polygon.Layer);  //GPG
+                                Result.Add(GMPC1);
+                            end;
+                            TrkPrim := GIterator.NextPCBObject;
+                        end;
+                    end;
+                    Polygon.GroupIterator_Destroy(GIterator);
                 end;
                 eFillObject :
                 begin
@@ -205,8 +254,13 @@ begin
     MLayer := Board.LayerStack_V7.LayerObject_V7[ML];
     Layer  := Board.CurrentLayer;
 
-    if not LayerUtils.IsMechanicalLayer((Layer)) then
-        Layer := ML;
+
+// only allow ComponentBody on Mechanical layer
+    if (Shape = olBody) then
+    begin
+        if not LayerUtils.IsMechanicalLayer((Layer)) then
+            Layer := ML;
+    end;
 
    //   make a primitive object list & then loop & test & generate contours.
     MaskObjList.Clear;
@@ -257,8 +311,11 @@ begin
             if (not dConfirm) and (HasHoles) then
                 dConfirm := ConfirmNoYesWithCaption('Shape Has Holes ','Just keep the outside shape ? ');
 
-            if (Shape = eComponentBodyObject) then
+            if (Shape = olBody) then
                 CompBody := AddExtrudedBodyToBoard(GMPC1, Layer, UnionIndex, dConfirm);
+
+            if (Shape = olRegion) then
+                AddRegionToBoard(GMPC1, nil, Layer, UnionIndex, dConfirm);
 
             ReportLog.Add(PadRight(IntToStr(I),2) + '  :  ' + IntTostr(GMPC1.Count) );
         end;
@@ -274,7 +331,11 @@ end;
 // main entry points
 procedure OutXBodys;
 begin
-    OutLiner(eComponentBodyObject);
+    OutLiner(olBody);
+end;
+procedure OutXRegions;
+begin
+    OutLiner(olRegion);
 end;
 
 
