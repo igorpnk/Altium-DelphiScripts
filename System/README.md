@@ -16,4 +16,6 @@ ImportServerOptionSection()   / OptionsIO.pas
 ExportServerOptionSection    / OptionsIO.pas
 > report of server options from Registry using IOptionReader interface
 
+FindCompDetails()   / DatabaseLibraryInterface.pas
+> POC of IDatabaseLibDocument interface
 
