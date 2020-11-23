@@ -34,7 +34,7 @@ Notes:
 Author : B.L. Miller
 29/05/2020  v0.10 inital POC
 29/05/2020  v0.11 handle Configure() having NOT been run, test SourceFilename & set to PrimaryImplDoc in Generate but don't store in OJ.
-
+23/11/2020  v0.12 Don't block the Project Releaser success.
 ..............................................................................}
 
 Interface    // not sure this is not just ignored in delphiscript.
@@ -113,14 +113,14 @@ begin
             case LayerClass of
                 eLayerClass_Electrical :
                 begin
-                   Copper    := LayerObj;
+                   Copper := LayerObj;
                    Result := Result + Copper.CopperThickness;
                 end;
 // this includes soldermask
                 eLayerClass_Dielectric :
                 begin
                     Dielectric := LayerObj;  // .Dielectric Tv6
-                    Result := Result + Dielectric.DielectricHeight;
+                    Result     := Result + Dielectric.DielectricHeight;
                 end;
             end;
             LayerObj := LayerStack.Next(Layerclass, LayerObj);
@@ -163,6 +163,7 @@ Begin
 
     PrjReport  := TStringList.Create;
     PrjReport.Add('Information:');
+    Prjreport.Add(DateToStr(Date) + ' ' + TimeToStr(Time));
     PrjReport.Add('  Project : ' + Prj.DM_ProjectFileName);
     FilePath := ExtractFilePath(Prj.DM_ProjectFullPath);
     PrjReport.Add('  Path    : ' + FilePath);
@@ -179,9 +180,9 @@ Begin
 
             TotThickness := BoardThicknessInfo(Board);
 
-            existingvalue   := '';
-            ParaName  := cBoardThicknessParameter;
-            ParaValue := CoordUnitToString(TotThickness, eMetric);
+            existingvalue := '';
+            ParaName      := cBoardThicknessParameter;
+            ParaValue     := CoordUnitToString(TotThickness, eMetric);
             ParameterAddUpdateValue(Prj, ParaName, ParaValue, existingvalue);
 
             PrjReport.Add('  Board   : ' + Board.FileName + '  ' + ParaName + ' = ' + ParaValue);
@@ -290,6 +291,7 @@ begin
     ParamList := TStringList.Create;
     ParamList.Clear;
     ParamList.Delimiter  := '|';
+    ParamList.StrictDelimiter := true;
     ParamList.NameValueSeparator := '=';
     ParamList.DelimitedText := Parameter;
 
@@ -322,31 +324,35 @@ begin
     ParamList := TStringList.Create;
     ParamList.Clear;
     ParamList.Delimiter  := '|';
+    ParamList.StrictDelimiter := true;    // extra spaces appear around value ?
     ParamList.NameValueSeparator := '=';
     ParamList.DelimitedText := Parameter;
     ParamList.Count;
 
     TargetPrefix := '';
     I := ParamList.IndexOfName('TargetPrefix');
-    if I > -1 then TargetPrefix := ParamList.ValueFromIndex(I);
+    if I > -1 then TargetPrefix := Trim(ParamList.ValueFromIndex(I));
     TargetFolder := '';
     I := ParamList.IndexOfName('TargetFolder');
-    if I > -1 then TargetFolder := ParamList.ValueFromIndex(I);
+    if I > -1 then TargetFolder := Trim(ParamList.ValueFromIndex(I));
     TargetFN := '';
     I := ParamList.IndexOfName('TargetFileName');
-    if I > -1 then TargetFN := ParamList.ValueFromIndex(I);
+    if I > -1 then TargetFN := Trim(ParamList.ValueFromIndex(I));
 
     Result := TargetFN;
 
-    if TargetFN = '' then
+    if SameString(TargetFN,'',True) then
     begin
-        Result := cDefaultReportFileName;
-//        I := ParamList.IndexOfName('TargetFileName');
-//        if I > -1 then
-//            ParamList.ValueFromIndex(I) := cDefaultOutputFileName
-//        else
-//            ParamList.Add('TargetFileName=' + cDefaultOutputFileName);
+        Result := cDefaultOutputFileName;
+        I := ParamList.IndexOfName('TargetFileName');
+        if I > -1 then
+//            ParamList.Put(I, 'TargetFileName=' + cDefaultOutputFileName)
+            ParamList.ValueFromIndex(I) := cDefaultOutputFileName
+        else
+            ParamList.Add('TargetFileName=' + cDefaultOutputFileName);
     end;
+
+//This function should be using parameters
 //    Result := ParamList.DelimitedText;
     ParamList.Free;
 end;
@@ -366,28 +372,31 @@ var
     OpenOutputs    : boolean;
 
 begin
+    Result := 'Success=0';
+
     ParamList := TStringList.Create;
     ParamList.Clear;
     ParamList.Delimiter  := '|';
+    ParamList.StrictDelimiter := true;
     ParamList.NameValueSeparator := '=';
     ParamList.DelimitedText := Parameter;
 
     TargetPrefix := '';
     I := ParamList.IndexOfName('TargetPrefix');
-    if I > -1 then TargetPrefix := ParamList.ValueFromIndex(I);
+    if I > -1 then TargetPrefix := Trim(ParamList.ValueFromIndex(I));
 
     TargetFolder := '';
-    I := ParamList.IndexOfName('TargetFolder');   
-    if I > -1 then TargetFolder := ParamList.ValueFromIndex(I);
+    I := ParamList.IndexOfName('TargetFolder');
+    if I > -1 then TargetFolder := Trim(ParamList.ValueFromIndex(I));
 
     TargetFN := '';
     I := ParamList.IndexOfName('TargetFileName');   // Prefix');
-    if I > -1 then TargetFN := ParamList.ValueFromIndex(I);
+    if I > -1 then TargetFN := Trim(ParamList.ValueFromIndex(I));
 
     SourceFileName := '';
     I := ParamList.IndexOfName(cSourceFileNameParameter);
     if I > -1 then
-        SourceFileName := ParamList.ValueFromIndex(I);
+        SourceFileName := Trim(ParamList.ValueFromIndex(I));
 
 //  explicit filename target gets stored by Configure.
 //  don't store PCB into OJob just let it use same primary doc logic next time.
@@ -407,8 +416,6 @@ begin
     I := ParamList.IndexOfName('AddToProject');
     if I > -1 then
         Str2Bool(ParamList.ValueFromIndex(I), AddToProject);
-
-    ParamList.Free;
 
     if TargetFolder = '' then
         TargetFolder := ExtractFilePath( GetWorkspace.DM_FocusedProject );
@@ -430,7 +437,10 @@ begin
     TargetFN := TargetFolder + TargetFN;
     ReportPCBStuff(SourceFileName, TargetFN, AddToProject, OpenOutputs);
 
-//   Parameter := 'simple string returned';
-   Result := 'done';  //'simple string returned';
+//   ParamList.Add('OutputStatus=Fail');       //Success
+//   Result := ParamList.DelimitedText; // 'false';  //'simple string returned';
+    ParamList.Free;
+
+    Result := 'Success=1';
 end;
 

@@ -35,11 +35,7 @@ BL Miller
                   Attempt support for relative path in Change.
 23/03/2020  v0.20 Use BOM output path to get input file for script. Support? fields.
 30/03/2020  v0.21 More protection for missing parameters in callback functions.
-07/04/2020  v0.30 AD19 does not work same as AD17 wrt (object = nil) vs Assigned(object)
-07/04/2020  v0.31 Refactor TParameterList out for TStringList
-08/04/2020  v0.40 Use temporary file copy of initial BoM output to eliminate file locking problems.
-29/05/2020  v0.41 Always initialise Result to something in PredictOutput..() function.
-23/11/2020  v0.42 Don't block Project Releaser success. 
+23/11/2020  v0.22 unblock Prj Releaser
 }
 
 const
@@ -69,6 +65,7 @@ const
 
 var
     Prj          : IProject;
+    PrjConfig    : IConfiguration;
     Doc           : IDocument;
     ServerDoc     : IServerDocument;
     OutPutMan     : IOutputManager;
@@ -135,72 +132,62 @@ Function PredictOutputFileNames(Parameter : String) : String;
 // Parameter == TargetFolder=   TargetFileName=    TargetPrefix=   OpenOutputs=(boolean)   AddToProject=(boolean)
 // return is just the filename
 var
-    ParamList    : TStringList;
+    ParamList    : TParameterList;
+    Param        : TParameter;
     TargetFolder : WideString;
     TargetPrefix : WideString;
     TargetFN     : WideString;
-    I : integer;
+
     OJM           : IOutputManager;
 
 begin
-    ParamList := TStringList.Create;
-    ParamList.Clear;
-    ParamList.Delimiter  := '|';
-    ParamList.NameValueSeparator := '=';
-    ParamList.DelimitedText := Parameter;
-    ParamList.Count;
-
+//    Param := TParameter;
+    ParamList := TParameterList.Create;
+    ParamList.ClearAllParameters;
+//    TParameterList
+    ParamList.SetState_FromString(Parameter, true);
     TargetPrefix := '';
-    I := ParamList.IndexOfName('TargetPrefix');
-    if I > -1 then TargetPrefix := ParamList.ValueFromIndex(I);
+    Param := ParamList.GetState_ParameterByName('TargetPrefix');
+    if Assigned(Param) then TargetPrefix := Param.Value;
     TargetFolder := '';
-    I := ParamList.IndexOfName('TargetFolder');
-    if I > -1 then TargetFolder := ParamList.ValueFromIndex(I);
+    Param := ParamList.GetState_ParameterByName('TargetFolder');
+    if Assigned(Param) then TargetFolder := Param.Value;
     TargetFN := '';
-    I := ParamList.IndexOfName('TargetFileName');
-    if I > -1 then TargetFN := ParamList.ValueFromIndex(I);
-
+    Param := ParamList.GetState_ParameterByName('TargetFileName');
+    if Assigned(Param) then TargetFN := Param.Value;
     Result := TargetFN;
+
+//    OJM := GetWorkspace.DM_OutputManager;
+//    OJ  := PCBServer.
 
     if TargetFN = '' then
     begin
         Result := cDefaultOutputFileName;
-//        I := ParamList.IndexOfName('TargetFileName');
-//        if I > -1 then
-//            ParamList.ValueFromIndex(I) := cDefaultOutputFileName
-//        else
-//            ParamList.Add('TargetFileName=' + cDefaultOutputFileName);
+//        ParamList.SetState_AddOrReplaceParameter('TargetFileName', cDefaultOutputFileName, true);
     end;
-//    Result := ParamList.DelimitedText;
-    ParamList.Free;
+//    Result := ParamList.GetState_ToString;
+    ParamList.Destroy;
 end;
 
 // OutJob configure button
 Function Configure(Parameter : String) : String;
 var
-    ParamList      : TStringList;
+    ParamList : TParameterList;
     SourceFileName : WideString;
-    I              : integer;
 
 begin
-    ParamList := TStringList.Create;
-    ParamList.Clear;
-    ParamList.Delimiter  := '|';
-    ParamList.NameValueSeparator := '=';
-    ParamList.DelimitedText := Parameter;
+    ParamList := TParameterList.Create;
+    ParamList.ClearAllParameters;
+    ParamList.SetState_FromString(Parameter);
 
 // write function to pick form list etc
 //    SourceFileName := PickSourceDoc(false);
     SourceFileName := cDefaultInputFileName;
 
-    I := ParamList.IndexOfName(cSourceFileNameParameter);
-    if I > -1 then
-        ParamList.ValueFromIndex(I) := SourceFileName
-    else
-        ParamList.Add(cSourceFileNameParameter + '=' + SourceFileName);
+    ParamList.SetState_AddOrReplaceParameter(cSourceFileNameParameter, SourceFileName, true);
 
-    Result := ParamList.DelimitedText;
-    ParamList.Free;
+    Result := ParamList.GetState_ToString;
+    ParamList.Destroy;
 end;
 
 // OutJob Generate Output Button
@@ -209,7 +196,7 @@ Function Generate(Parameter : String) : String;
 var
     InputFile      : TextFile;
     OutputFile     : TextFile;
-    ferror         : Integer;
+    error          : Integer;
     TargetFD       : WideString;
     TargetPrefix   : WideString;
     TargetFN       : WideString;     // script output file
@@ -222,8 +209,8 @@ var
     tmpfile      : Widestring;
     tmpstr       : WideString;
     Document     : IDocument;
-    ParamList    : TStringList;
-//    Param        : IParameter;
+    ParamList    : TParameterList;
+    Param        : IParameter;
     Line         : WideString;
     OutLine      : WideString;
     OpenOutputs  : boolean;
@@ -240,45 +227,43 @@ var
 begin
     Result := 'Success=0';
 
-    ParamList := TStringList.Create;
-    ParamList.Clear;
-    ParamList.Delimiter  := '|';
-    ParamList.NameValueSeparator := '=';
-    ParamList.DelimitedText := Parameter;
+    Param := TParameter;
+    ParamList := TParameterList.Create;
+    ParamList.ClearAllParameters;
+    ParamList.SetState_FromString(Parameter);
 
     TargetPrefix := '';
-    I := ParamList.IndexOfName('TargetPrefix');
-    if I > -1 then TargetPrefix := ParamList.ValueFromIndex(I);
-    TargetFD := '';
-    I := ParamList.IndexOfName('TargetFolder');   // Prefix');
-    if I > -1 then TargetFD := ParamList.ValueFromIndex(I);
-    TargetFN := '';
-    I := ParamList.IndexOfName('TargetFileName');   // Prefix');
-    if I > -1 then TargetFN := ParamList.ValueFromIndex(I);
+    Param := ParamList.GetState_ParameterByName('TargetPrefix');
+    if Assigned(Param) then TargetPrefix := Param.Value;
 
-    SourceFN := cDefaultInputFileName;       // in case configure was never run.
-    I := ParamList.IndexOfName(cSourceFileNameParameter);
-    if I > -1 then
-        SourceFN := ParamList.ValueFromIndex(I)
+    TargetFd := '';
+    Param := ParamList.GetState_ParameterByName('TargetFolder');
+    if Assigned(Param) then TargetFd := Param.Value;
+    TargetFN := '';                        // output target name
+    Param := ParamList.GetState_ParameterByName('TargetFileName');
+    if Assigned(Param) then TargetFN := Param.Value;
+
+    SourceFN := cDefaultInputFileName;
+    Param    := ParamList.GetState_ParameterByName(cSourceFileNameParameter);    // input target name from Configure()
+    if not Assigned(Param) then
+        ParamList.SetState_AddOrReplaceParameter(cSourceFileNameParameter, cDefaultInputFileName, true)
     else
-        ParamList.Add(cSourceFileNameParameter + '=' + SourceFN);
-
+        SourceFN := Param.Value;                                                // in case configure was never run.
     OpenOutputs := false;
-    I := ParamList.IndexOfName('OpenOutputs');
-    if I > -1 then
-        Str2Bool(ParamList.ValueFromIndex(I), OpenOutputs);
+    ParamList.GetState_ParameterAsBoolean('OpenOutputs', OpenOutputs);
 
-    ParamList.Free;
+    ParamList.Destroy;
+    Param := nil;
+
     Rpt := TStringList.Create;
 
     Prj := GetWorkspace.DM_FocusedProject;
     Doc := GetWorkSpace.DM_FocusedDocument;
     if Doc.DM_DocumentKind <> cDocKind_OutputJob then exit;
-
+ 
     if bDebugfile then
     begin
         Rpt.Add(' Generate ');
-        Rpt.Add(  Parameter );
         Rpt.Add(' Running Script Prj ' + GetRunningScriptProjectName);
         Rpt.Add(' CurrentDocFN    ' + GetCurrentDocumentFileName);
         Rpt.Add(' Server          ' + GetActiveServerName);
@@ -459,6 +444,7 @@ begin
 //    if bFSuccess and FileExists(POS_Path, false) then
 //        bFSuccess := DeleteFile(POS_Path);
 
+try
     if bFSuccess then
     begin
         AssignFile(OutputFile, POS_Path);
@@ -472,6 +458,13 @@ begin
         ShowMessage('File/path not found : ' + POS_Path);
         exit;
     end;
+except
+    bFSuccess := false;
+//    CloseFile(OutputFile);
+    ShowMessage('File output problem, locked? : ' + POS_Path);
+    Exit;
+end;
+
 
     SourceFNExt := '.csv';
     if not FileExists(CSV_Path + SourceFNExt, false) then bFSuccess := false;
@@ -485,18 +478,17 @@ begin
         end;
     end;
 
-//  temporary file copy of input BOM file to avoid "Open Outputs" locking.
     tmpfile := SpecialFolder_Temporary + IntToStr(DateTimeToFileDate(Date)) + '.tmp';
     CopyFile(CSV_Path + SourceFNExt, tmpfile, false);
 
-    AssignFile(InputFile, tmpfile);
-//    FileMode := fmOpenRead;
-// {$I-}
+    AssignFile(InputFile, tmpfile);            // CSV_Path + SourceFNExt);
+    FileMode := fmOpenRead;
+{$I-}
     Reset(InputFile);
-    ferror := 0;
-//    ferror := IOResult;       // not sure this works.
+    error := IOResult;
 {$I+}
-    if ferror <> 0 then
+//    Reset(InputFile);
+    if error <> 0 then
     begin
         bFSuccess := false;
         CloseFile(OutputFile);
@@ -504,6 +496,7 @@ begin
         ShowMessage('File input problem, locked? : ' + CSV_Path);
         Exit;
     end;
+
 
     while not EOF(InputFile) do
     begin
@@ -535,12 +528,12 @@ begin
             Writeln(Outputfile, '');
 
     end;
-
+	
     CloseFile(InputFile);
     CloseFile(OutputFile);
     if FileExists(tmpfile, false) then
-        DeleteFile(tmpfile);
-
+	    DeleteFile(tmpfile);
+	
     Result := 'Success=1';
 
     if OpenOutputs then
@@ -566,10 +559,8 @@ var
     bUseOPName     : boolean;
     OPP, OPO, OPM  : WideString;
     OPV, OPMV, OFN : WideString;
+
     OJ             : IOutputJob;
-    OptionsMan     : IOptionsManager;
-    Reader         : IOptionsReader;
-    RValue         : WideString;
 
 begin
     Rpt   := TStringList.Create;
@@ -586,6 +577,17 @@ begin
     Doc.DM_FileName;
     Doc.DM_ParameterCount;
 
+    Prj.DM_ConfigurationCount;
+    Prj.DM_Configurations(0);
+    PrjConfig := Prj.DM_GetDefaultConfiguration;  // IConfiguration
+    Prj.DM_GetDefaultConfigurationName;
+    PrjConfig.DM_Name;
+    PrjConfig.DM_ParameterCount;
+    PrjConfig.DM_ConstraintGroupCount;
+    PrjConfig.DM_ConstraintsFileCount;
+    PrjConfig.DM_LongDescriptorString;
+    PrjConfig.DM_GetTargetDeviceName;
+
     if Doc.DM_DocumentKind <> cDocKind_OutputJob then exit;
 
     Rpt.Add('Dump OutJob Report ');
@@ -595,17 +597,6 @@ begin
 //    if (ServerDoc.Modified = -1) then ServerDoc.DoSafeFileSave('OutJob');
 
     OJDoc := ServerDoc;     // GetWorkspace.DM_GetOutputJobDocumentByPath(Doc.DM_FullPath);
-
-    ServerDoc.ServerModule.ModuleName;
-    Reader := Client.OptionsManager.GetOptionsReader('WorkSpaceManager', Doc.DM_FullPath);    // from loaded
-    sDummy := GetActiveServerName;
-    if Reader.SectionExists(cOJFHeadingPublish) then
-    begin
-        sDummy := Reader.ReadSection(cOJFHeadingPublish);
-        sDummy := Reader.ReadString(cOJFHeadingPublish, cOJFOutputFilePath, '');
- //       SectKeys.DelimitedText := AValue;
-    end;
-    Reader := nil;
 
 //    OPGen := Client.ClientAPI.GetCurrentOutputGenerator;   // IInterface
 //    OPGen.GetExplicitTargetFileName;
@@ -768,6 +759,6 @@ begin
     TargetFN := 'input.txt';               //  cDefaultInputFileName
     OutputFN := 'direct-call-output.txt';  // generate makes its own output name.
 //  pass a spoofed parameterlist
-    Generate('TargetFolder=' + TargetFD + ' | ' + 'TargetFilename=' + OutputFN + ' | ' + cSourceFileNameParameter + '=' + TargetFN + ' | ' + 'OpenOutputs=true');
+    Generate('TargetFolder=' + TargetFD + ' | TargetFilename=' + OutputFN + ' | ' + cSourceFileNameParameter + '=' + TargetFN + ' | OpenOutputs=true');
 end;
 

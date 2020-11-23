@@ -40,6 +40,7 @@ B.L. Miller
 09/04/2020  v0.44 Change from fn to proc form of methods for ParameterList.
 29/05/2020  v0.45 Replace ParameterList with StringList methods.
 29/05/2020  v0.46 Output path - file was missing a path separator
+23/11/2020  v0.47 Unblock Project Releaser workflow.
 ..............................................................................}
 
 Interface    // not sure this is not just ignored in delphiscript.
@@ -293,6 +294,8 @@ var
     OpenOutputs    : boolean;
 
 begin
+    Result := 'Success=0';
+
     ParamList := TStringList.Create;
     ParamList.Clear;
     ParamList.Delimiter  := '|';
@@ -350,7 +353,6 @@ begin
     TargetFN := TargetFolder + PathDelim + TargetFN;
     ReportPCBStuff(SourceFileName, TargetFN, AddToProject, OpenOutputs);
 
-//   Parameter := 'simple string returned';
-   Result := 'done';  //'simple string returned';
+    Result := 'Success=1';   //'simple string returned';
 end;
 
