@@ -8,12 +8,13 @@ ToggleStringBoolean() / Registry.pas
 ListTheInstalls()    / InstallSummary.pas
 > Reports all AD installs found in Windows Registry.
 
-
+DialogClose / DialogClose.pas
+> collection vbs & batch file scripts to close blocking dialogs in AD that are invoked by scripts.
 
 ImportServerOptionSection()   / OptionsIO.pas
 > pointless non-functional import server options from file
 
-ExportServerOptionSection    / OptionsIO.pas
+ExportServerOptionSection()   / OptionsIO.pas
 > report of server options from Registry using IOptionReader interface
 
 FindCompDetails()   / DatabaseLibraryInterface.pas

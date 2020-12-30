@@ -1,19 +1,29 @@
 # Altium-DelphiScripts
-Scripts for Altium Designer 17/18.
+Scripts for Altium Designer 17/18/19.
+
+#Project:
+PrjCompLibReLinker / PrjLibReLinker.pas
+> attempts to resolve all project wide component & footprints to "self" project source libs.
+PrjCompLibReLinker / CompSourceLibReLinker.pas
+> attempts to resolve all component & footprints of current document to "self" project source libs.
+
+# System:
+See System folder..
 
 # PCB:
-MechLayerNames /MechLayerNames.pas
-> Export/Import mech layer names, colours & mechanical pairs etc.
- 
-RunDesignRules / RunDesignRulesZone.pas
-> Run DRC on an rectangular area or a selected or picked object.
+See PCB folder..
 
-DisperseComponents / DisperseComps.pas >
-> disperse/arrange unplaced components by class or source SchDoc into clusters at RHS edge of board outline.
-
-CleanNets / CleanRBConnections.pas
-> "cleans" the rubberband Connections after scripted FP move etc.
+#PcbLib:
+FootPrintReport.pas
+> Summary table of layers used & primitive counts etc..
 
 # OutJob:
 OutJob-Script / SimpleOJScript.pas
 > demo of OutJob run script interacting with OutJob interface (Configure, Change & Generate)
+
+#Sch:
+
+#SchLib:
+
+# FormatCopy:
+
