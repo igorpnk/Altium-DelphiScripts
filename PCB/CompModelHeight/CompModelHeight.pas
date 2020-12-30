@@ -16,6 +16,8 @@ ReportCompModelHeights()
  23/06/2020  v0.24 Fixed export filename & model type check
  23/07/2020  v0.25 Add PcbLib support to GetCompModelHeight()
  24/07/2020  v0.26 Handle finding no top or bottom projection models. (display <none>)
+ 25/09/2020  v0.27 Don't destroy Model after assigning it to compBody.
+ 30/12/2020  v0.28 Add PcbLib support to ExportCompModels()
 
 Import/Export Board Step removed.
 
@@ -38,12 +40,13 @@ var
     FileName  : WideString;
     Board     : IPCB_Board;
     PcbLib    : IPCB_Library;
+    IsLib     : boolean;
     BOrigin   : TPoint;
 
 function ModelTypeToStr (ModType : T3DModelType) : WideString;
 begin
     Case ModType of
-        0                     : Result := 'Extruded';            // AD19 defines e3DModelType_Extrude but not works.
+        0                     : Result := 'Extruded';            // AD19 defines e3DModelType_Extrude but not work.
         e3DModelType_Generic  : Result := 'Generic Model';
         2                     : Result := 'Cylinder';
         3                     : Result := 'Sphere';
@@ -67,7 +70,7 @@ begin
 
         while (LayerObj <> Nil ) do
         begin
-            LayerObj.IsInLayerStack;       // check always true.
+            LayerObj.IsInLayerStack;                        // check always true.
             if (LayerClass = eLayerClass_Electrical) then   // includes eLayerClass_Signal
             begin
                 Copper := LayerObj;
@@ -76,14 +79,14 @@ begin
             end;
             if (LayerClass = eLayerClass_Dielectric) then   // includes eLayerClass_SolderMask
             begin
-                Dielectric := LayerObj;   // .Dielectric Tv6
+                Dielectric := LayerObj;                     // .Dielectric Tv6
                 Result := Result + Dielectric.DielectricHeight;
             end;
 
             LayerObj := LayerStack.Next(Layerclass, LayerObj);
         end;
     end;
-    if Result <= 0 then Result := MMsToCoord(1.6);  // default thickness (1.6mm)
+    if Result <= 0 then Result := MMsToCoord(1.6);          // default thickness (1.6mm)
 end;
 
 function OSSafeFileName(FN : WideString) : WideString;
@@ -100,49 +103,6 @@ begin
     else
         Result            := 'bad side!  ';
     end;
-end;
-
-function CheckForModelDifference(CompBody : IPCB_ComponentBody, FPO : IPCB_Component) : boolean;
-var
-    GIterator     : IPCB_GroupIterator;
-    CompBody2     : IPCB_ComponentBody;
-    CompModel     : IPCB_Model;
-    CompModel2    : IPCB_Model;
-    ModFileName   : WideString;
-    ModFileName2  : WideString;
-
-begin
-    Result := false;
-    if FPO = nil then exit;
-
-    CompModel := CompBody.Model;
-  
-    GIterator := FPO.GroupIterator_Create;
-    GIterator.Addfilter_ObjectSet(MkSet(eComponentBodyObject));
-    CompBody2 := GIterator.FirstPCBObject;
-
-    while CompBody2 <> Nil do
-    begin
-        if CompBody2.GetState_ModelType = CompBody.GetState_ModelType then
-        begin
-            CompModel2   := CompBody2.Model;
-            ModFileName  := '';
-            ModFileName2 := '';
-
-            if CompModel2 <> nil then
-                ModFileName2 := CompModel2.FileName;
-            if CompModel <> nil then
-                ModFileName := CompModel.FileName;
-
-            if ModFileName2             <> ModFileName             then Result := true;
-            if CompBody2.BodyProjection <> CompBody.BodyProjection then Result := true;
-            if CompBody2.StandOffHeight <> CompBody.StandoffHeight then Result := true;
-            if CompBody2.OverallHeight  <> CompBody.OverallHeight  then Result := true;
-            if CompBody2.Layer          <> CompBody.Layer          then Result := true;
-        end;
-        CompBody2 := GIterator.NextPCBObject;
-    end;
-    FPO.GroupIterator_Destroy(GIterator);
 end;
 
 Procedure ReportModelHeights;
@@ -281,9 +241,6 @@ Begin
                 ModFileName := CompModel.FileName;
                 CompModel.Rotation;
                 CompModel.ModelType;
-                    // CompModel.UniqueName;
-                    // CompModel.Descriptor    .Detail;
-                    // CompBody.SaveModelToFile(path);
             end;
 
             ModProject  := CompBody.BodyProjection;
@@ -292,16 +249,6 @@ Begin
             ModLayer    := CompBody.Layer;
             ModType     := CompBody.GetState_ModelType;  // T3DModelType
 
- //  Add one instance of unique FPs (name or o.height or standoff or model filename)
-//                if FPOList.IndexOf(Footprint) = -1 then
-//                    FPOList.Add(Footprint)
-//                else begin
-//                    for I := 0 to (FPOList.Count - 1) do
-//                    begin
-//                        OListFP := FPOList.Items(I);
-//                        if CheckForModelDifference(CompBody, OListFP) then
-//                        begin
-//                            FPOList.Add(Footprint);
             if J = 1 then
                 Rpt.Add('FP ' + FPName + '   ' + FPPattern + '  FP height ' + CoordUnitToString(FPHeight, cUnitMM) );
 
@@ -309,10 +256,6 @@ Begin
             Rpt.Add(' '  + Board.LayerName(ModLayer)  + '  ' + PadRight(ModelTypeToStr(ModType), 10) +
                     '  ' + BoardSideToStr(ModProject) + '  ' + CoordUnitToString(ModHeight, cUnitMM ) +
                     '  ' + CoordUnitToString(ModStandOff, cUnitMM) + '       ' + ModFileName);
-//                        end;
-
-//                    end;
-//                end;
 
             If ModProject = eBoardSide_Top then
             begin
@@ -398,7 +341,6 @@ Begin
     end;
 End;
 
-
 Procedure ExportCompModels;
 var
     FIterator        : IPCB_BoardIterator;
@@ -416,13 +358,27 @@ var
     FSSafeFileName   : WideString;
     FileSaved        : boolean;
 
-    ORotX,ORotY,ORotZ : double;
-    OISOHeight        : integer;
-
 begin
     Document := GetWorkSpace.DM_FocusedDocument;
-    Board := PCBServer.GetCurrentPCBBoard;
-    If Board = Nil Then Exit;
+    if not ((Document.DM_DocumentKind = cDocKind_PcbLib) or (Document.DM_DocumentKind = cDocKind_Pcb)) Then
+    begin
+         ShowMessage('No PcbDoc or PcbLib selected. ');
+         Exit;
+    end;
+    IsLib  := false;
+    if (Document.DM_DocumentKind = cDocKind_PcbLib) then
+    begin
+        PcbLib := PCBServer.GetCurrentPCBLibrary;
+        Board := PcbLib.Board;
+        IsLib := true;
+    end else
+        Board  := PCBServer.GetCurrentPCBBoard;
+
+    if (Board = nil) and (PcbLib = nil) then
+    begin
+        ShowError('Failed to find PcbDoc or PcbLib.. ');
+        exit;
+    end;
 
     FilePath := ExtractFilePath(Board.FileName) + cExport3DMFolder;
 
@@ -430,19 +386,32 @@ begin
     Rpt.Add('');
     Rpt.Add('Export Generic 3D Models:');
 
-    FIterator := Board.BoardIterator_Create;
+    if IsLib then
+        FIterator := PcbLib.LibraryIterator_Create
+    else FIterator := Board.BoardIterator_Create;
+
     FIterator.AddFilter_ObjectSet(MkSet(eComponentObject));
     FIterator.AddFilter_IPCB_LayerSet(LayerSetUtils.AllLayers);
-    FIterator.AddFilter_Method(eProcessAll);   // TIterationMethod { eProcessAll, eProcessFree, eProcessComponents }
+
+    if IsLib then
+        FIterator.SetState_FilterAll
+    else
+        FIterator.AddFilter_Method(eProcessAll);   // TIterationMethod { eProcessAll, eProcessFree, eProcessComponents }
 
     try
         Footprint := FIterator.FirstPCBObject;
 
         while Footprint <> Nil Do
         begin
-//            Rpt.Add('');
-            FPName    := Footprint.Name.Text;
-            FPPattern := Footprint.Pattern;
+            if IsLib then
+            begin
+                FPName := Footprint.Name;
+                FPPattern := '';
+            end else
+            begin
+                FPName    := Footprint.Name.Text;
+                FPPattern := Footprint.Pattern;
+            end;
 
             GIterator := Footprint.GroupIterator_Create;
             GIterator.Addfilter_ObjectSet(MkSet(eComponentBodyObject));
@@ -457,19 +426,11 @@ begin
 
                 if CompModel <> nil then
                 begin
-                    ModFileName := CompModel.FileName;
-                    ModFileName := FPPattern + '_' + ModFileName;
+                    ModFileName    := CompModel.FileName;
+                    ModFileName    := FPPattern + '_' + ModFileName;
                     FSSafeFileName := ModFileName;
+                    ModType        := CompModel.ModelType;
 
-                    CompModel.Rotation;
-                    // CompBody.SetState_FromModel;
-        //            TempCompModel := CompModel.I_Replicate;
-
-                    ORotX := 0.01 ; ORotY := 0.01; ORotZ := 0.01; OISOHeight := 1;
-       //             TempCompModel.GetState(Get ORotX, ORotY, ORotZ, OISOHeight);
-
-                    ModType     := CompModel.ModelType;
-               //   ModType     := CompBody.GetState_ModelType;  // T3DModelType
                     if ModelTypeToString(ModType) =  cModel3DGeneric then
                     begin
 
@@ -487,8 +448,10 @@ begin
         End;
 
     finally
+        if IsLib then
+            PcbLib.LibraryIterator_Destroy(FIterator)
+        else Board.BoardIterator_Destroy(FIterator);
 
-        Board.BoardIterator_Destroy(FIterator);
     end;
  
     Rpt.Insert(0, 'Export 3D Models  for ' + ExtractFileName(Board.FileName) );
