@@ -30,8 +30,10 @@ Author BL Miller
 18/08/2020  v0.23  Added mechlayer names & kinds summary for enabled layers. Added enabled & used status.
 18/08/2020  v0.24  Support PcbDoc; Disable kind legend (redundant repeat info).
 19/08/2020  v0.25  Fix pad stack display for non stack FPs.
+05/01/2021  v0.26  Added paste shape size (rule & fixed exp.) & support for PcbDoc in PadReport.
 
 note: First 4 or 5 statements run in the top of main loop seem to prevent false stale info
+Paste mask shape may not return the minimal dimension.
 
 reports layer by exception if layer > cFullMechLayerReport const.
 
@@ -514,9 +516,12 @@ end;
 procedure ReportPadHole;
 var
     Pad          : IPCB_Pad;
+    PShape       : TShape;
     PadCache     : TPadCache;
     PlanesArray  : TPlanesConnectArray;
     CPL          : WideString;
+    FPName       : WideString;
+    FPPattern    : WideString;
     Layer        : TLayer;
     NoOfPrims    : Integer;
     BR           : TCoordRect;
@@ -529,22 +534,29 @@ var
 //    Units        : TUnit;
 
 begin
-    CurrentLib := PCBServer.GetCurrentPCBLibrary;
-    If CurrentLib = Nil Then
-    Begin
-        ShowMessage('This is not a PcbLib document');
-        Exit;
-    End;
-    CBoard := CurrentLib.Board;
+    Doc := GetWorkSpace.DM_FocusedDocument;
+    if not ((Doc.DM_DocumentKind = cDocKind_PcbLib) or (Doc.DM_DocumentKind = cDocKind_Pcb)) Then
+    begin
+         ShowMessage('No PcbDoc or PcbLib selected. ');
+         Exit;
+    end;
+    IsLib  := false;
+    if (Doc.DM_DocumentKind = cDocKind_PcbLib) then
+    begin
+        CurrentLib := PCBServer.GetCurrentPCBLibrary;
+        CBoard := CurrentLib.Board;
+        IsLib := true;
+    end else
+        CBoard  := PCBServer.GetCurrentPCBBoard;
+
+    if (CBoard = nil) and (CurrentLib = nil) then
+    begin
+        ShowError('Failed to find PcbDoc or PcbLib.. ');
+        exit;
+    end;
 
     BeginHourGlass(crHourGlass);
 //    Units := eImperial;
-
-    // For each page of library is a footprint
-    FPIterator := CurrentLib.LibraryIterator_Create;
-    FPIterator.SetState_FilterAll;
-    FPIterator.AddFilter_IPCB_LayerSet(LayerSetUtils.AllLayers);
-
     BadFPList := TStringList.Create;
     Rpt       := TStringList.Create;
     Rpt.Add(ExtractFileName(CBoard.FileName));
@@ -552,21 +564,45 @@ begin
     Rpt.Add('');
     Rpt.Add('');
 
+    // For each page of library is a footprint
+    if IsLib then
+        FPIterator := CurrentLib.LibraryIterator_Create
+    else FPIterator := CBoard.BoardIterator_Create;
+    FPIterator.AddFilter_ObjectSet(MkSet(eComponentObject));
+    FPIterator.AddFilter_IPCB_LayerSet(LayerSetUtils.AllLayers);
+    if IsLib then
+        FPIterator.SetState_FilterAll
+    else
+        FPIterator.AddFilter_Method(eProcessAll);   // TIterationMethod { eProcessAll, eProcessFree, eProcessComponents }
+
     Footprint := FPIterator.FirstPCBObject;
     while Footprint <> Nil Do
     begin
+       if IsLib then
+        begin
+            FPName    := Footprint.Name;
+            FPPattern := '';
+        end else
+        begin
+            FPName    := Footprint.Name.Text;
+            FPPattern := Footprint.Pattern;
+            FPName    := FPName + ' ' + FPPattern;
+        end;
+
 // one of the next 4 or 5 lines seems to fix the erronous bounding rect of the alphabetic first item in Lib list
 // suspect it changes the Pad.Desc text as well
-        CBoard := CurrentLib.Board;
-        CurrentLib.SetBoardToComponentByName(Footprint.Name) ;   // fn returns boolean
+        if IsLib then
+        begin
+            CurrentLib.SetBoardToComponentByName(Footprint.Name) ;   // fn returns boolean
 //  this below line unselects selected objects;
-        CurrentLib.SetState_CurrentComponent (Footprint);
-        CBoard.ViewManager_FullUpdate;
-        CurrentLib.RefreshView;
+            CurrentLib.SetState_CurrentComponent (Footprint);
+            CurrentLib.RefreshView;
+        end;
 
+        CBoard.ViewManager_FullUpdate;
         CBoard.RebuildPadCaches;
 
-        Rpt.Add('Footprint : ' + Footprint.Name);
+        Rpt.Add('Footprint : ' + FPName + ' | ' + FPPattern);
         Rpt.Add('');
 
         BOrigin  := Point(CBoard.XOrigin,      CBoard.YOrigin     );  // abs Tcoord
@@ -585,12 +621,12 @@ begin
                 '  x2 ' + CoordUnitToString(BR.x2, eMil) + '  y2 ' + CoordUnitToString(BR.y2, eMil) );
 
         if (CoordToMils(BOrigin.X) <> XOExpected) or (CoordToMils(BOrigin.Y) <> YOExpected) then
-            BadFPList.Add('BAD FP origin     ' + Footprint.Name);
+            BadFPList.Add('BAD FP origin     ' + FPName);
         if (BR.x1 > 0) or (BR.x2 < 0) or (BR.y1 > 0) or (BR.y2 < 0) then
-            BadFPList.Add('BAD origin Outside b.rect ' + Footprint.Name);
+            BadFPList.Add('BAD origin Outside b.rect ' + FPName);
 
         if (abs(FPCoG.X) > MilsToRealCoord(200)) or (abs(FPCoG.Y) > MilsToRealCoord(200))then
-            BadFPList.Add('possible bounding rect. offset ' + Footprint.Name);
+            BadFPList.Add('possible bounding rect. offset ' + FPName);
 
 // bits of footprint
         Iterator := Footprint.GroupIterator_Create;
@@ -639,6 +675,29 @@ begin
                 Rpt.Add('Pad Stack Size Mid(X,Y): (' + CoordUnitToString(Pad.MidXSize, Units) + ',' + CoordUnitToString(Pad.MidYSize, Units) + ')');
                 Rpt.Add('Pad Stack Size Bot(X,Y): (' + CoordUnitToString(Pad.BotXSize, Units) + ',' + CoordUnitToString(Pad.BotYSize, Units) + ')');
 
+
+//                Pad.XStackSizeOnLayer(eTopSolder);
+//                PShape := Pad.StackShapeOnLayer(eTopPaste);
+//                PShape := Pad.ShapeOnLayer(eTopPaste);
+//                if Layer = eMultiLayer then
+//                begin
+
+                if Layer = eTopLayer then
+                begin
+//        BR same answer put no rotation adjustment.
+                       BR := Pad.BoundingRectangleOnLayer(eTopPaste);
+//                       Rpt.Add('Pad PM BROL Top(X,Y): (' + CoordUnitToString(BR.X2-BR.X1, Units) + ',' + CoordUnitToString(BR.Y2-BR.Y1, Units) + ')');
+                       Rpt.Add('Pad PasteMask SOL  Top(X,Y): (' + CoordUnitToString(Pad.XSizeOnLayer(eTopPaste), Units) + ',' +
+                                                    CoordUnitToString(Pad.YSizeOnLayer(eTopPaste), Units) + ')' );
+                end;
+                if Layer = eBottomLayer then
+                begin
+                      BR := Pad.BoundingRectangleOnLayer(eBottomPaste);
+//                       Rpt.Add('Pad PM BROL Top(X,Y): (' + CoordUnitToString(BR.X2-BR.X1, Units) + ',' + CoordUnitToString(BR.Y2-BR.Y1, Units) + ')');
+                       Rpt.Add('Pad PasteMask SOL  Top(X,Y): (' + CoordUnitToString(Pad.XSizeOnLayer(eBottomPaste), Units) + ',' +
+                                                    CoordUnitToString(Pad.YSizeOnLayer(eBottomPaste), Units) + ')' );
+                end;
+//                end;
             end;
 
             if (Prim.GetState_ObjectId = ePadObject) then
@@ -721,7 +780,13 @@ begin
         Footprint := FPIterator.NextPCBObject;
     end;
 
-    CurrentLib.LibraryIterator_Destroy(FPIterator);
+    if IsLib then
+        CurrentLib.LibraryIterator_Destroy(FPIterator)
+    else CBoard.BoardIterator_Destroy(FPIterator);
+
+    if IsLib then CurrentLib.Navigate_FirstComponent;
+    CBoard.GraphicalView_ZoomRedraw;
+    if IsLib then CurrentLib.RefreshView;
 
     for I := 0 to (BadFPList.Count - 1) do
     begin
