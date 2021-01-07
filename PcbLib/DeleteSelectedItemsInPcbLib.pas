@@ -14,17 +14,23 @@
  26/07/2020  v1.3  Using temp FP list finally solves problem.  Use create TempComp in middle.
  15/08/2020  v1.4  Take temp FP ObjectList soln from 02.pas (26/07/2020)
  07/01/2021  v1.5  Try again with TInterfaceList & rearranged Delete() outside of GroupIterator
+ 08/01/22021 v1.6  Added StatusBar percentage delete progress & Cursor busy.
+
+Can NOT delete primitives that are referenced inside an iterator as this messes up "indexing".
+Must re-create the iterator after any object deletion.
+Use of TInterfaceList (for external dll calls etc) may not be required.
 
 Creating a temporary component is required.
-Selecting it with CurrentLib.SetState_CurrentComponent(TempPcbLibComp) clears all selections.
-
+Selecting Comp with CurrentLib.SetState_CurrentComponent(TempPcbLibComp) clears all selections.
 ..............................................................................}
+
 const
     MaxObjects = 1000;
     FP = '___TemporaryComponent__DeleteMeWhenDone___';   // name for temp FP comp.
 
 Procedure DeleteSelectedItemsFromFootprints;
 Var
+    GUIMan            : IGUIManager;
     CurrentLib        : IPCB_Library;
     TempPCBLibComp    : IPCB_LibComponent;
 
@@ -43,8 +49,12 @@ Var
     intDialog         : Integer;
     Remove            : boolean;
     First             : boolean;                // control (limit) LibCompList to ONE instance.
+    sStatusBar        : WideString;
+    iStatusBar        : integer;
 
 Begin
+     GUIMan := Client.GUIManager;
+
      CurrentLib := PCBServer.GetCurrentPCBLibrary;
      If CurrentLib = Nil Then
      Begin
@@ -77,7 +87,7 @@ Begin
 
 //  Use a line such as the following if you would like to limit the type of items you are allowed to delete, in the example line below,
 //  this would limit the script to Component Body Objects
-//       FIterator.Addfilter_ObjectSet(MkSet(eComponentBodyObject));
+//       GIterator.Addfilter_ObjectSet(MkSet(eComponentBodyObject));
 
         MyPrim := GIterator.FirstPCBObject;
         while MyPrim <> Nil Do
@@ -116,9 +126,10 @@ Begin
 // focus the temp footprint
     CurrentLib.SetState_CurrentComponent(TempPcbLibComp);
 //    CurrentLib.CurrentComponent := TempPcbLibComp;
-    CurrentLib.Board.ViewManager_FullUpdate;   // update all panels assoc. with PCB
+    CurrentLib.Board.ViewManager_FullUpdate;          // update all panels assoc. with PCB
     CurrentLib.RefreshView;
 
+    BeginHourGlass(crHourGlass);
     PCBServer.PreProcess;
 
     FIterator := CurrentLib.LibraryIterator_Create;
@@ -126,7 +137,10 @@ Begin
 
     Footprint := FIterator.FirstPCBObject;
     while Footprint <> Nil Do
-    begin //Iterate through each footprint finding Selected objects and building a list
+    begin
+        iStatusBar := Int(HowManyInt / SelCountToT * 100);
+        sStatusBar := ' Deleting : ' + IntToStr(iStatusBar) + '% done';
+        GUIMan.StatusBar_SetState (1, sStatusBar);
 
         for J := 0 to (FPList.Count - 1) do
         begin
@@ -155,7 +169,7 @@ Begin
                     begin
                          Footprint.RemovePCBObject(DeleteList.Items(I));
                          DeleteList.Delete(I);                              // speed up
-                         inc(HowmanyInt);
+                         inc(HowManyInt);
                     end
                     else
                         inc(I);                                             // do not inc() when removing elements!
@@ -171,7 +185,6 @@ Begin
     CurrentLib.LibraryIterator_Destroy(FIterator);
 
     DeleteList.Clear;
-//    FPList.Clear;
     FPList.Destroy;
     DeleteList.Free;
 
@@ -186,6 +199,7 @@ Begin
     CurrentLib.Board.ViewManager_FullUpdate;
     CurrentLib.Board.GraphicalView_ZoomRedraw;
     CurrentLib.RefreshView;
+    EndHourGlass;
 
     if HowManyInt > 0 then CurrentLib.Board.SetState_DocumentHasChanged;
 
