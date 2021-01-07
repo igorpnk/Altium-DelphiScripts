@@ -16,6 +16,8 @@ See PCB folder..
 #PcbLib:
 FootPrintReport.pas
 > Summary table of layers used & primitive counts etc..
+DeleteSelectedItemsInPcbLib.pas
+> Delete all (pre)-selected (use FSO etc) primitives in PcbLib.
 
 # OutJob:
 OutJob-Script / SimpleOJScript.pas
