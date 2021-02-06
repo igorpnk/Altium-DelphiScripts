@@ -1,11 +1,12 @@
 {..............................................................................
- SolderMaskOnMechLayer.pas
+ MasksOnMechLayers.pas
    from SolderMaskTracks02.pas
 
    Make (+ve) soldermask on mechanical layer(s).
+   Make (-ve) pastemask on mechanical layer(s).
    Sliver removal option.
    Optional expansion.
-   Can use auto mask expansions & direct primitives on SM layer.
+   Can use auto mask expansions & direct primitives on mask layers.
    Can rerun Top & Bottom SM separately/repeated.
 
    Existing soldermask shapes used.
@@ -21,9 +22,12 @@
       Can not add SM shapes as only use polygon poured as region shape..
       Use mask expansion rules for pads & pad regions.
 
+   If the Mask mech layer polygon is deleted then the polycoutouts MUST be removed manually (Select All On Layer).
 
 B. Miller
 05/02/2021  v1.01  from original SolderMaskTracks -/+ve mech layer mask
+06/02/2021  v1.02  UpdateLayerTabs in case mech layer is just enabled..
+07/02/2021  v1.03  add back the PasteMask code & fix Current Layer view.
 
  ..............................................................................}
 
@@ -34,15 +38,23 @@ Const
     cSMSliverRemoval    = true;   // true or false ONLY.
 
 // to support ugly mech layer mess above eMech 24/32, these will have to change to value j = [8,  9]
-// and code to use  LayerUtils.MechanicalLayer(j);
-    cScratchPadTop         = eMechanical8;      // mech layers with no regions or poly (or cutouts)
-    cScratchPadBottom      = eMechanical9;
+// soldermask
+    cScratchPadTop         = 8;        // eMechanical8;      // mech layers with no regions or poly (or cutouts)
+    cScratchPadBot         = 9;        // eMechanical9;
+// pastemask layers
+    cScratchPadTopPaste    = 18;      // eMechanical18  layers with no regions or poly (or cutouts)
+    cScratchPadBotPaste    = 19;
 
     mmInch = 25.4;
     ePolyRegionKind_Cutout = 1;
-    cMaskPolygonNameTop    = '__TempOutlinePolygonTop__';    // allows retain BOTH top & bottom mask outputs together.
-    cMaskPolygonNameBot    = '__TempOutlinePolygonBot__';
-    cTempPolyName          = '__TempTrkMaskPoly___';
+// soldermask
+    cSMaskPolygonNameTop    = '__TempOutlinePolygonTop__';    // allows retain BOTH top & bottom mask outputs together.
+    cSMaskPolygonNameBot    = '__TempOutlinePolygonBot__';
+//    cSTempPolyName          = '__TempTrkMaskPoly___';
+// pastemask
+    cPMaskPolygonNameTop    = '__TempOutlinePastePolygonTop__';    // allows retain BOTH top & bottom mask outputs together.
+    cPMaskPolygonNameBot    = '__TempOutlinePastePolygonBot__';
+//    cPTempPolyName          = '__TempTrkPasteMaskPoly___';
 
 Var
    Board        : IPCB_Board;
@@ -238,7 +250,7 @@ Begin
     Poly.GroupIterator_Destroy(GIter);
 End;
 
-function RemoveUnionObjects(UIndex : Integer; Layers : TSet) : boolean;
+function RemoveUnionObjects(UIndex : Integer; const PLayerSet : IPCB_LayerSet) : boolean;
 var
     BIterator : IPCB_BoardIterator;
     Primitive    : IPCB_Primitive;
@@ -248,15 +260,14 @@ begin
     Result := false;
     MaskObjList := TObjectList.Create;
     BIterator := Board.BoardIterator_Create;
-
     BIterator.AddFilter_ObjectSet(MkSet(ePolyObject, eRegionObject));   // (eRegionObject, ePadObject, ePolyObject, eFillObject));
-    BIterator.AddFilter_LayerSet(AllLayers);
+    BIterator.AddFilter_IPCB_LayerSet(PLayerSet);
     BIterator.AddFilter_Method(eProcessAll);
 
     Primitive := BIterator.FirstPCBObject;
     while (Primitive <> Nil) do
     begin
-        if (Primitive.UnionIndex = UIndex) and InSet(Primitive.Layer, Layers) then
+        if (Primitive.UnionIndex = UIndex) then //  and PLayerSet.Contains(Primitive.Layer) then
             MaskObjList.Add(Primitive);
         Primitive := BIterator.NextPCBObject;
     end;
@@ -272,29 +283,32 @@ end;
 
 function RemoveMaskPolyAndUnionRegions(MaskPolyName : WideString, OutLayer : TLayer) : boolean;
 var
-    BIterator : IPCB_BoardIterator;
+    BIterator     : IPCB_BoardIterator;
     Polygon       : IPCB_Polygon;
     UnionIndex    : Integer;
-
+    PLayerSet     : IPCB_LayerSet;
 begin
     Result := false;
 // remove any previous/pre-existing polygon mask & region pieces including on SolderMask layers.
+    PLayerSet := LayerSetutils.EmptySet;
+    PLayerSet.Include(OutLayer);
+
     BIterator := Board.BoardIterator_Create;
     BIterator.AddFilter_ObjectSet(MkSet(ePolyObject));
-    BIterator.AddFilter_LayerSet(AllLayers);          // useless above eMech24.
+    BIterator.AddFilter_IPCB_LayerSet(PLayerSet);          // Filter_LayerSet(AllLayers) useless above eMech24.
     BIterator.AddFilter_Method(eProcessAll);
 
     Polygon := BIterator.FirstPCBObject;
     while (Polygon <> Nil) Do
     Begin
-       if (Polygon.Name = MaskPolyName) and (Polygon.Layer = OutLayer) then
+       if (Polygon.Name = MaskPolyName) then // and (Polygon.Layer = OutLayer) then
        begin
            UnionIndex := Polygon.UnionIndex;
            Board.RemovePCBObject(Polygon);
            Result := true;
            ReportLog.Add('Deleted existing Polygon : ' + Polygon.Name);
            if UnionIndex <> 0 then
-               RemoveUnionObjects(UnionIndex, MkSet(OutLayer, eTopSolder, eBottomSolder));
+               RemoveUnionObjects(UnionIndex, PLayerSet);
        end;
        Polygon := BIterator.NextPCBObject;
     end;
@@ -352,7 +366,7 @@ begin
 end;
 
 {..............................................................................}
-Procedure MakeSolderMask(const Dummy : boolean; const Layer : TLayer);
+Procedure MakeMechLayerMask(const Dummy : boolean; const Layer : TLayer; const InLayer : TLayer);
 Var
     RepourMode    : TPolygonRepourMode;
     Stack         : IPCB_LayerStack;
@@ -383,6 +397,7 @@ Var
     Net         : IPCB_Net;
     SMEX        : TCoord;
     MaskEnabled : boolean;
+    IsPasteMask : boolean;
 
     MaskObjList  : TObjectList;    // all valid mask objects
     MaskPolyName : WideString;
@@ -393,7 +408,8 @@ Var
     I, J         : Integer;
     InsideBO     : Boolean;
 
-    InLayer      : TLayer;             // alt. source
+//    InLayer      : TLayer;             // alt. source
+    MechLayer    : IPCB_MechanicalLayer;
     OutLayer     : TLayer;             // target output
     PolyLayer    : TLayer;
     LayerSet     : TSet;
@@ -411,14 +427,30 @@ Begin
     MaskObjList  := TObjectList.Create;
 
     // mech layer to output shapes on.. & cache poly & UnionIndex for cleanup
-    OutLayer     := cScratchPadTop;             // LayerUtils.MechanicalLayer(j)
-    MaskPolyName := cMaskPolygonNameTop;
-    InLayer      := eTopSolder;
-    if (Layer = eBottomLayer) then
-    begin
-        InLayer      := eBottomSolder;
-        OutLayer     := cScratchPadBottom;
-        MaskPolyName := cMaskPolygonNameBot;
+    IsPasteMask := false;
+    Case InLayer of
+        eBottomSolder :
+        begin
+            OutLayer     := LayerUtils.MechanicalLayer(cScratchPadBot);
+            MaskPolyName := cSMaskPolygonNameBot;
+        end;
+        eTopPaste :
+        begin
+            IsPasteMask := true;
+            OutLayer     := LayerUtils.MechanicalLayer(cScratchPadTopPaste);
+            MaskPolyName := cPMaskPolygonNameTop;
+        end;
+        eBottomPaste :
+        begin
+            IsPasteMask := true;
+            OutLayer     := LayerUtils.MechanicalLayer(cScratchPadBotPaste);
+            MaskPolyName := cPMaskPolygonNameBot;
+        end;
+        else    // TopSolder or other.
+        begin
+            OutLayer     := LayerUtils.MechanicalLayer(cScratchPadTop);
+            MaskPolyName := cSMaskPolygonNameTop;
+        end;
     end;
 
     UnionIndex := 0;
@@ -467,7 +499,6 @@ Begin
           eFillObject :
           begin
               Fill := Primitive;
-//              if Fill.Layer = Layer then MakeRegion := true;
               MakeRegion := true;
           end;
 
@@ -480,14 +511,12 @@ Begin
           eTrackObject :
           begin
               Track := Primitive;
-//              if Track.Layer = Layer then MakeRegion := true;
               MakeRegion := true;
     //          if Track.InPolygon then MakeRegion := false;      // hatched polygons !
           end;
           eArcObject :
           begin
               Arc := Primitive;
-//              if Arc.Layer = Layer then MakeRegion := true;
               MakeRegion := true;
     //          if Arc.InPolygon then MakeRegion := false;      // hatched polygons !
           end;
@@ -502,20 +531,14 @@ Begin
               end
               else
                   if Pad.StackShapeOnLayer(Layer) then   // Pad.Component.Descriptor;
-          //    if Pad.Mode = ePadMode_ExternalStack then
-          //        if (Pad.XStackSizeOnLayer[Layer] = 0) or (Pad.YStackSizeOnLayer[Layer] = 0) Then
                       MakeRegion := true;
           end;
 
           eViaObject :
           begin    // check for actual drawn pad on Layer layer
               Via := Primitive;
-//              if Via.Mode = ePadMode_Simple then
-//              begin
-
-                  if (Via.IntersectLayer(Layer) or (Via.Layer = eMultilayer) ) then
-                  // test for expansions.
-                       MakeRegion := true;
+              if (Via.IntersectLayer(Layer) or (Via.Layer = eMultilayer) ) then
+                  MakeRegion := true;
           end;
 
 //   only interested in rendered primitives of polygons
@@ -527,35 +550,25 @@ Begin
               MakeRegion := False;
           end;
 
-          eRegionObject :    // make sure not poly cutout
+          eRegionObject :    
           begin
-              Region := Primitive;           // for component FP
-              Region.IsSimpleRegion;         // true
-              Region.InNet;                  // true (what if pin is NoNet??)
-
+              Region := Primitive;     
               MakeRegion := False;
-//       pad region
-              if (Region.Layer = Layer) then
+
+//       solid copper region
+              if (Region.Kind = eRegionKind_Copper) then    // make sure not poly cutout
               begin
-                  if (Region.Kind = eRegionKind_Copper) and (Region.InComponent) then
+                  if (Region.Layer = Layer) then
                       MakeRegion := true;
-//       polygon copper.
-                  if Region.InPolygon then
+//      on soldermask layer
+                  if (Region.Layer = InLayer) then
                       MakeRegion := True;
               end;
 
-//       free region copper
-              if (not Region.InComponent) and (not Region.InPolygon) then
-                  MakeRegion := True;
-//      on soldermask layer
-              if (Region.Layer = InLayer) then
-                  MakeRegion := True;
-
-              if Region.Name = 'Default Layer Stack Region' then
-                  MakeRegion := False;
-              if Region.Kind  = eRegionKind_BoardCutout then MakeRegion := False;
-              if Region.Kind  = ePolyRegionKind_Cutout  then MakeRegion := False;
-              if Region.Layer = eMultiLayer then             MakeRegion := False;
+              if Region.Name = 'Default Layer Stack Region' then MakeRegion := False;
+              if Region.Kind  = eRegionKind_BoardCutout then     MakeRegion := True;
+              if Region.Kind  = ePolyRegionKind_Cutout  then     MakeRegion := False;
+              if Region.Layer = eMultiLayer then                 MakeRegion := False;
           end;
         end; //case
 
@@ -576,7 +589,6 @@ Begin
 // copper regions : poly cutouts has auto SM mask then expand shape.
 
     ReportLog.Add('MakePolyRegion from  Prim : in layer :        onto layer :     RegionKind : ');
-    AExpansion := MilsToCoord(0);
 
     PcbServer.PCBContourMaker.ArcResolution := MilsToCoord(cArcApproximation);
 
@@ -587,17 +599,19 @@ Begin
 
         Primitive := MaskObjList.Items[I];
         Layer := Primitive.Layer;
-//  have to go to top or bottom copper pad & get expansion etc??
-//  lets try mask expansion layers
-        if Layer = eTopLayer    then InLayer := eTopSolder;
-        if Layer = eBottomLayer then InLayer := eBottomSolder;
 
-//        InLayer := Layer;
         if Primitive <> Nil then
         begin
-//            PolyRegionKind := eRegionKind_Copper;          // ePolyRegionKind_Copper
-            PolyRegionKind := ePolyRegionKind_Cutout;      // eRegionKind_cutout
-            SMEX := Primitive.GetState_SolderMaskExpansion;
+            PolyRegionKind := ePolyRegionKind_Cutout;       // eRegionKind_cutout
+            if not IsPasteMask then
+            begin
+                SMEX        := Primitive.GetState_SolderMaskExpansion;
+                MaskEnabled := Primitive.GetState_SolderMaskExpansionMode;
+            end else
+            begin
+                SMEX        := Primitive.GetState_PasteMaskExpansion;
+                MaskEnabled := Primitive.GetState_PasteMaskExpansionMode;
+            end;
             AExpansion := MilsToCoord(cExtraExpansion);
 
             case Primitive.ObjectID of
@@ -605,7 +619,6 @@ Begin
               begin
                   Text := Primitive;
                   if (Text.Layer = InLayer) then MakeRegion := true;
-//                  InLayer := Layer;
                   GMPC1 := PCBServer.PCBContourMaker.MakeContour (Text, AExpansion, InLayer);
               end;
 
@@ -613,9 +626,6 @@ Begin
               begin
                   Track := Primitive;
                   MakeRegion := true;
-//                  InLayer := Layer;
-                  SMEX        := Track.GetState_SolderMaskExpansion;
-                  MaskEnabled := Track.GetState_SolderMaskExpansionMode;
                   AExpansion := MilsToCoord(cExtraExpansion) + SMEX;
                   if (MaskEnabled <> eMaskExpansionMode_NoMask) or (Track.Layer = InLayer) then
                       GMPC1 := PCBServer.PCBContourMaker.MakeContour (Track, AExpansion, InLayer)
@@ -627,9 +637,6 @@ Begin
               begin
                   Arc := Primitive;
                   MakeRegion := true;
-//                  InLayer := Layer;
-                  SMEX        := Arc.GetState_SolderMaskExpansion;
-                  MaskEnabled := Arc.GetState_SolderMaskExpansionMode;
                   AExpansion  := MilsToCoord(cExtraExpansion) + SMEX;
                   if (MaskEnabled <> eMaskExpansionMode_NoMask)  or (Arc.Layer = InLayer) then
                       GMPC1 := PCBServer.PCBContourMaker.MakeContour (Arc, AExpansion, InLayer)
@@ -640,12 +647,10 @@ Begin
             eRegionObject :
               begin
                   Region      := Primitive;
-                  SMEX        := Region.GetState_SolderMaskExpansion;
-                  MaskEnabled := Region.GetState_SolderMaskExpansionMode;
                   AExpansion  := MilsToCoord(cExtraExpansion) + SMEX;
 
-// cutouts holes
-                  if Region.Kind  = eRegionKind_BoardCutout then
+// cutouts holes only on SM not PM
+                  if not IsPasteMask and (Region.Kind  = eRegionKind_BoardCutout) then
                       MakeRegion := true;
 
                   if (Region.Kind = eRegionKind_Copper) then
@@ -672,8 +677,6 @@ Begin
             eFillObject :
               begin
                   Fill := Primitive;
-                  SMEX        := Fill.GetState_SolderMaskExpansion;
-                  MaskEnabled := Fill.GetState_SolderMaskExpansionMode;
                   AExpansion  := MilsToCoord(cExtraExpansion) + SMEX;
                   MakeRegion := true;
                   if (MaskEnabled <> eMaskExpansionMode_NoMask) or (Region.Layer = InLayer) then
@@ -691,7 +694,7 @@ Begin
             eViaObject  :
               begin
                   Via := Primitive;
-                  MakeRegion := true;
+                  if not IsPasteMask then MakeRegion := true;
                   GMPC1 := PCBServer.PCBContourMaker.MakeContour (Via, AExpansion, InLayer);
               end;
             end;
@@ -699,7 +702,7 @@ Begin
             if MakeRegion then
             begin
                 TempMaskRegion := MakeNewPolygonRegion(GMPC1, OutLayer, PolyRegionKind, UnionIndex);
-                ReportLog.Add(PadRight(Primitive.ObjectIDString,16) + '  '  +  PadRight(cLayerStrings[OutLayer],16) + '  ' + IntToStr(PolyRegionKind));
+                ReportLog.Add(PadRight(Primitive.ObjectIDString,16) + '  '  +  PadRight(Layer2String(OutLayer),16) + '  ' + IntToStr(PolyRegionKind));
             end;
         end;
     end;    // for I
@@ -727,18 +730,16 @@ Begin
 
 
 // Explode Polygon from mech layer to regions on solderMask
-//    if (Layer = eTopLayer) then InLayer := eTopSolder;
-//    if (Layer = eBottomLayer) then InLayer := eBottomSolder;
 //    MakeRegionFromPoly (TempMaskPolygon, 0, InLayer, eRegionKind_Copper, true, UnionIndex); // fn TObjectList;
 
-
     Board.LayerIsDisplayed(OutLayer) := True;
-    Client.SendMessage('PCB:SetCurrentLayer', 'Layer=' + IntToStr(OutLayer) , 255, Client.CurrentView);
+    Board.CurrentLayer := OutLayer;
+    Board.ViewManager_UpdateLayerTabs;
     Client.SendMessage('PCB:Zoom', 'Action=Redraw', 255, Client.CurrentView);
 
      // PolyArea := Board.BoardOutline.AreaSize ;
     MAString := FormatFloat(',0.####',(MaskArea - MaskWPCOArea) / (k1Inch * k1Inch / mmInch / mmInch));
-    ShowMessage(Layer2String(Layer) + ' : ' + MAString + 'sqmm');
+    ShowMessage(Layer2String(OutLayer) + ' : ' + MAString + 'sqmm');
 
     //Revert back to previous user polygon repour option.
     PCBServer.SystemOptions.PolygonRepour := RepourMode;
@@ -756,23 +757,22 @@ Begin
 
 Procedure SolderMaskTop;
 begin
-    MakeSolderMask(True, eTopLayer);      
+    MakeMechLayerMask(True, eTopLayer, eTopSolder);      
 end;
 Procedure SolderMaskBottom;
 begin
-    MakeSolderMask(True, eBottomLayer);
+    MakeMechLayerMask(True, eBottomLayer, eBottomSolder);
 end;
-{
-Procedure NoTrackSolderMaskTop(dummy : integer);
+Procedure PasteMaskTop;
 begin
-    MakeSolderMask(false, eTopLayer);   
+    MakeMechLayerMask(True, eTopLayer, eTopPaste);      
 end;
-Procedure NoTrackSolderMaskBottom(dummy : integer);
+Procedure PasteMaskBottom;
 begin
-    MakeSolderMask(false, eBottomLayer);
+    MakeMechLayerMask(True, eBottomLayer, eBottomPaste);
 end;
-}
-Procedure PurgeClean;
+
+Procedure PurgeSolderMaskClean;
 begin
     Board := PCBServer.GetCurrentPCBBoard;
     If Board = Nil Then Exit;
@@ -780,37 +780,27 @@ begin
 
 //    if (TempMaskPolyClearanceRule <> nil) then
 //        Board.RemovePCBObject(TempMaskPolyClearanceRule);
-
 // clean out previous mask poly & region (& poly) pieces (cutouts & solid)
-    RemoveMaskPolyAndUnionRegions(cMaskPolygonNameTop, cScratchPadTop);
-    RemoveMaskPolyAndUnionRegions(cMaskPolygonNameBot, cScratchPadBottom);
+    RemoveMaskPolyAndUnionRegions(cSMaskPolygonNameTop, LayerUtils.MechanicalLayer(cScratchPadTop));
+    RemoveMaskPolyAndUnionRegions(cSMaskPolygonNameBot, LayerUtils.MechanicalLayer(cScratchPadBot));
     ReportLog.Free;
 end;
 
+Procedure PurgePasteMaskClean;
+begin
+    Board := PCBServer.GetCurrentPCBBoard;
+    If Board = Nil Then Exit;
+    ReportLog    := TStringList.Create;
 
+// clean out previous mask poly & region (& poly) pieces (cutouts & solid)
+    RemoveMaskPolyAndUnionRegions(cPMaskPolygonNameTop, LayerUtils.MechanicalLayer(cScratchPadTopPaste));
+    RemoveMaskPolyAndUnionRegions(cPMaskPolygonNameBot, LayerUtils.MechanicalLayer(cScratchPadBotPaste));
+    ReportLog.Free;
+end;
 {..............................................................................}
 
-{ IPCB_MakeContour method
-(IPCB_ContourMaker interface)
-Syntax
-Function MakeContour(APrim   : IPCB_Primitive; AExpansion : TCoord; ALayer : TLayer) : Pgpc_Polygon;
-Function MakeContour(ATrack  : IPCB_Track    ; AExpansion : TCoord; ALayer : TLayer) : Pgpc_Polygon;
-Function MakeContour(APad    : IPCB_Pad      ; AExpansion : TCoord; ALayer : TLayer) : Pgpc_Polygon;
-Function MakeContour(AFill   : IPCB_Fill     ; AExpansion : TCoord; ALayer : TLayer) : Pgpc_Polygon;
-Function MakeContour(AVia    : IPCB_Via      ; AExpansion : TCoord; ALayer : TLayer) : Pgpc_Polygon;
-Function MakeContour(AArc    : IPCB_Arc      ; AExpansion : TCoord; ALayer : TLayer) : Pgpc_Polygon;
-Function MakeContour(ARegion : IPCB_Region   ; AExpansion : TCoord; ALayer : TLayer) : Pgpc_Polygon;
-Function MakeContour(AText   : IPCB_Text     ; AExpansion : TCoord; ALayer : TLayer) : Pgpc_Polygon;
-Function MakeContour(APoly   : IPCB_Polygon  ; AExpansion : TCoord; ALayer : TLayer) : Pgpc_Polygon;
-}
-
 {
-     Region.InPolygon   ;
-     Region.IsSimpleRegion   ;
-     Region.IsKeepout;
-     Region.Kind  ;   //TRegionKind
-
-  TPolyRegionKind = ( ePolyRegionKind_Copper,
+TPolyRegionKind = ( ePolyRegionKind_Copper,
                     ePolyRegionKind_Cutout,
                     ePolyRegionKind_NamedRegion);
 
