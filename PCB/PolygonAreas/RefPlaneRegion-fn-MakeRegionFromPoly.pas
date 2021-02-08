@@ -11,6 +11,7 @@ Hatched polygon support needs to contour lines & arcs & merge (ClipContourContou
 B. Miller   Ver  Comment
 12/12/2019  0.10 Function copied from RefPlaneRegion 0.25
 07/08/2020  0.11 Updated fn to handle all possible "pieces" & contours (inc. holes) or just outline.
+08/02/2021  0.12 Separate unconnected region contours, set masks, example. invert idea.
 
  ..............................................................................}
 
@@ -20,45 +21,68 @@ Var
 
 function MakeRegionsFromPoly (Poly : IPCB_Polygon, const Expansion : TCoord, const Layer : TLayer, const RegKind : TRegionKind, const MainContour : boolean) : TObjectList;
 var
-    GIterator  : IPCB_GroupIterator;
-    Region     : IPCB_Region;
-    NewRegion  : IPCB_Region;
-    GMPC       : IPCB_GeometricPolygon;
-    Net        : IPCB_Net;
+    GIterator   : IPCB_GroupIterator;
+    Region      : IPCB_Region;
+    NewRegion   : IPCB_Region;
+    GMPC, GMPC2 : IPCB_GeometricPolygon;
+    CPOL        : TInterfaceList;
+    Net         : IPCB_Net;
 begin
    // PCBServer.PCBContourMaker.SetState_ArcResolution(MilsToCoord(ArcResolution));    // control contour arc approx.
-
     Result := TObjectList.Create;
+    CPOL   := CreateInterfaceList;
     Net    := Poly.Net;
+
+    PCBServer.PreProcess;
 //  poly can be composed of multiple regions
+//  holes are extra contours in GeoPG
     GIterator  := Poly.GroupIterator_Create;
     Region := GIterator.FirstPCBObject;
     while Region <> nil do
     begin
-//  holes are extra contours in GeoPG
-        GMPC := PcbServer.PCBContourMaker.MakeContour(Region, Expansion, Layer);
-//        GMPC.Count;
-        NewRegion := PCBServer.PCBObjectFactory(eRegionObject, eNoDimension, eCreate_Default);
-        PCBServer.SendMessageToRobots(NewRegion.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+     //   GMPC := Region.GeometricPolygon;
+        GMPC2 := PcbServer.PCBContourMaker.MakeContour(Region, Expansion, Layer);
+{
+        if Invert then
+        begin
+            for I := 1 to (GMPC.Count - 1) do
+                GMPC2.Addcontour(GMPC.Contour(I));
+        end else
+            GMPC2 := GMPC;
+}
+// split any unconnected contours (now not holes etc)
+        PCBserver.PCBContourUtilities.SplitIntoConnectedPolygons(GMPC2, CPOL);
+        for I := 0 to (CPOL.Count - 1) do
+        begin
+            GMPC := CPOL.Items[I];
+            if GMPC.Count > 0 then
+            begin
+                NewRegion := PCBServer.PCBObjectFactory(eRegionObject, eNoDimension, eCreate_Default);
+                PCBServer.SendMessageToRobots(NewRegion.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
 
-        if MainContour then
-            NewRegion.SetOutlineContour( GMPC.Contour(0) )
-        else
-            NewRegion.GeometricPolygon := GMPC;
+                if MainContour then
+                    NewRegion.SetOutlineContour( GMPC.Contour(0) )
+                else
+                    NewRegion.GeometricPolygon := GMPC;
 
-        NewRegion.SetState_Kind(RegKind);
-        NewRegion.Layer := Layer;
-        if Net <> Nil then NewRegion.Net := Net;
+                NewRegion.SetState_Kind(RegKind);
+                NewRegion.Layer := Layer;
+                if Net <> Nil then NewRegion.Net := Net;
+                NewRegion.SetState_SolderMaskExpansionMode (eMaskExpansionMode_NoMask);
+                NewRegion.SetState_PasteMaskExpansionMode  (eMaskExpansionMode_NoMask);
 
-        Board.AddPCBObject(NewRegion);
-        Result.Add(NewRegion);
-
-        PCBServer.SendMessageToRobots(NewRegion.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
-        PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, NewRegion.I_ObjectAddress);
+                Board.AddPCBObject(NewRegion);
+                PCBServer.SendMessageToRobots(NewRegion.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, NewRegion.I_ObjectAddress);
+                Result.Add(NewRegion);
+            end;
+        end;
+        CPOL.Clear;
 
         Region := GIterator.NextPCBObject;
     end;
     Poly.GroupIterator_Destroy(GIterator);
+    PCBServer.PostProcess;
 end;
 
 {..............................................................................}

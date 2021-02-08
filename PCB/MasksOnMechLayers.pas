@@ -28,13 +28,13 @@ B. Miller
 05/02/2021  v1.01  from original SolderMaskTracks -/+ve mech layer mask
 06/02/2021  v1.02  UpdateLayerTabs in case mech layer is just enabled..
 07/02/2021  v1.03  add back the PasteMask code & fix Current Layer view.
-
+08/02/2021  v1.04  unused fn: MakeRegionFromPoly() fixed multi disconnected regions being one region esp. inverting.
  ..............................................................................}
 
 Const
     cSMPolyNeck         = 2 ;     // mils
     cArcApproximation   = 0.1;    //mils
-    cExtraExpansion     = 0;      //mils          this is not useable because of UGLY HACK
+    cExtraExpansion     = 0;      //mils        
     cSMSliverRemoval    = true;   // true or false ONLY.
 
 // to support ugly mech layer mess above eMech 24/32, these will have to change to value j = [8,  9]
@@ -83,9 +83,10 @@ Begin
     Result.SetState_Kind(PolyRegionKind);
     Result.Kind  := PolyRegionKind;
     Result.UnionIndex := UIndex;
+    Result.SetState_SolderMaskExpansionMode (eMaskExpansionMode_NoMask);
+    Result.SetState_PasteMaskExpansionMode  (eMaskExpansionMode_NoMask);
 
     Board.AddPCBObject(Result);
-
     PCBServer.SendMessageToRobots(Result.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
     PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Result.I_ObjectAddress);
 End;
@@ -134,6 +135,8 @@ Begin
     Result.SetState_CopperPourInvalid;
     Result.Rebuild;
     Result.CopperPourValidate;
+    Result.SetState_SolderMaskExpansionMode (eMaskExpansionMode_NoMask);
+    Result.SetState_PasteMaskExpansionMode  (eMaskExpansionMode_NoMask);
 
     PCBServer.SendMessageToRobots(Result.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
     PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Result.I_ObjectAddress);
@@ -267,7 +270,7 @@ begin
     Primitive := BIterator.FirstPCBObject;
     while (Primitive <> Nil) do
     begin
-        if (Primitive.UnionIndex = UIndex) then //  and PLayerSet.Contains(Primitive.Layer) then
+        if (Primitive.UnionIndex = UIndex) then       //  and PLayerSet.Contains(Primitive.Layer) then
             MaskObjList.Add(Primitive);
         Primitive := BIterator.NextPCBObject;
     end;
@@ -316,25 +319,29 @@ begin
     Board.BoardIterator_Destroy(BIterator);
 end;
 
-function MakeRegionFromPoly (Poly : IPCB_Polygon, Expansion : TCoord, Layer : TLayer, const PolyRegionKind : TPolyRegionKind, Invert : boolean, UIndex : integer) : TObjectList;
+function MakeRegionFromPoly (Poly : IPCB_Polygon, const Layer : TLayer, const PolyRegionKind : TPolyRegionKind, const Invert : boolean, UIndex : integer) : TObjectList;
 // invert is just ignore first contour of each shape & outline area.
 var
     GIterator   : IPCB_GroupIterator;
     Region      : IPCB_Region;
     NewRegion   : IPCB_Region;
     GMPC, GMPC2 : IPCB_GeometricPolygon;
+    CPOL        : TInterfaceList;
     Net         : IPCB_Net;
     I           : integer;
 begin
+    CPOL   := CreateInterfaceList;
     Result := TObjectList.Create;
     Net    := Poly.Net;
-//  poly (solid) can be composed of multiple regions  or lines & arcs (hatched)
+    PCBServer.PreProcess;
+
+//  poly (solid) can be composed of multiple unconnected regions or lines & arcs (hatched)
+//  holes are extra contours in GeoPG
     GIterator  := Poly.GroupIterator_Create;
     Region := GIterator.FirstPCBObject;
     while Region <> nil do
     begin
-//  holes are extra contours in GeoPG
-        GMPC  := PcbServer.PCBContourMaker.MakeContour(Region, Expansion, Layer);
+        GMPC := Region.GeometricPolygon;
         GMPC2 := PcbServer.PCBGeometricPolygonFactory;    // empty geopoly.
 
         if Invert then
@@ -342,27 +349,38 @@ begin
             for I := 1 to (GMPC.Count - 1) do
                 GMPC2.Addcontour(GMPC.Contour(I));
         end else
-            GMPC2 := GMPC1;
+            GMPC2 := GMPC;
 
-        if GMPC2.Count > 0 then
+// split any unconnected contours (now not holes etc)
+        PCBserver.PCBContourUtilities.SplitIntoConnectedPolygons(GMPC2, CPOL);
+        for I := 0 to (CPOL.Count - 1) do
         begin
-            NewRegion := PCBServer.PCBObjectFactory(eRegionObject, eNoDimension, eCreate_Default);
-            PCBServer.SendMessageToRobots(NewRegion.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+            GMPC := CPOL.Items[I];
+            if GMPC.Count > 0 then
+            begin
+                NewRegion := PCBServer.PCBObjectFactory(eRegionObject, eNoDimension, eCreate_Default);
+                PCBServer.SendMessageToRobots(NewRegion.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
 
-            NewRegion.GeometricPolygon := GMPC2;
-            NewRegion.SetState_Kind(PolyRegionKind);
-            NewRegion.Layer := Layer;
-            if Net <> Nil then NewRegion.Net := Net;
-            NewRegion.UnionIndex := UIndex;
-            Board.AddPCBObject(NewRegion);
-            Result.Add(NewRegion);
+                NewRegion.GeometricPolygon := GMPC;
+                NewRegion.SetState_Kind(PolyRegionKind);
+                NewRegion.Layer := Layer;
+                if Net <> Nil then NewRegion.Net := Net;
+                NewRegion.UnionIndex := UIndex;
+                NewRegion.SetState_SolderMaskExpansionMode (eMaskExpansionMode_NoMask);
+                NewRegion.SetState_PasteMaskExpansionMode  (eMaskExpansionMode_NoMask);
+                Board.AddPCBObject(NewRegion);
+                Result.Add(NewRegion);
 
-            PCBServer.SendMessageToRobots(NewRegion.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
-            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, NewRegion.I_ObjectAddress);
+                PCBServer.SendMessageToRobots(NewRegion.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, NewRegion.I_ObjectAddress);
+            end;
         end;
+        CPOL.Clear;
+
         Region := GIterator.NextPCBObject;
     end;
     Poly.GroupIterator_Destroy(GIterator);
+    PCBServer.PostProcess;
 end;
 
 {..............................................................................}
@@ -522,7 +540,7 @@ Begin
           end;
 
           ePadObject :
-          begin    // check for actual drawn pad on Layer layer
+          begin    // check for actual drawn pad on Layer copper layer
               Pad := Primitive;
               if Pad.Mode = ePadMode_Simple then
               begin
@@ -730,7 +748,7 @@ Begin
 
 
 // Explode Polygon from mech layer to regions on solderMask
-//    MakeRegionFromPoly (TempMaskPolygon, 0, InLayer, eRegionKind_Copper, true, UnionIndex); // fn TObjectList;
+//    MakeRegionFromPoly (TempMaskPolygon, InLayer, eRegionKind_Copper, true, UnionIndex); // fn TObjectList;
 
     Board.LayerIsDisplayed(OutLayer) := True;
     Board.CurrentLayer := OutLayer;
