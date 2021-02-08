@@ -24,11 +24,15 @@
 
    If the Mask mech layer polygon is deleted then the polycoutouts MUST be removed manually (Select All On Layer).
 
+   Note:
+   Via primitive has bad MaskExpansionMode (mask enabled) property for paste layers, must manually block pastemask.
+
 B. Miller
 05/02/2021  v1.01  from original SolderMaskTracks -/+ve mech layer mask
 06/02/2021  v1.02  UpdateLayerTabs in case mech layer is just enabled..
 07/02/2021  v1.03  add back the PasteMask code & fix Current Layer view.
 08/02/2021  v1.04  unused fn: MakeRegionFromPoly() fixed multi disconnected regions being one region esp. inverting.
+09/02/2021  v1.05  bug all Fill had MaskEnabled true.
  ..............................................................................}
 
 Const
@@ -696,9 +700,8 @@ Begin
               begin
                   Fill := Primitive;
                   AExpansion  := MilsToCoord(cExtraExpansion) + SMEX;
-                  MakeRegion := true;
-                  if (MaskEnabled <> eMaskExpansionMode_NoMask) or (Region.Layer = InLayer) then
-                      MakeRegion := true;
+                  if (MaskEnabled <> eMaskExpansionMode_NoMask) then MakeRegion := true;
+                  if (Region.Layer = InLayer) then                   MakeRegion := true;
                   GMPC1 := PCBServer.PCBContourMaker.MakeContour (Fill, AExpansion, InLayer);
               end;
 
@@ -712,7 +715,8 @@ Begin
             eViaObject  :
               begin
                   Via := Primitive;
-                  if not IsPasteMask then MakeRegion := true;
+                  if (MaskEnabled <> eMaskExpansionMode_NoMask) then MakeRegion := true;  // via primitive has bad value..
+                  if IsPasteMask then MakeRegion := false;
                   GMPC1 := PCBServer.PCBContourMaker.MakeContour (Via, AExpansion, InLayer);
               end;
             end;
