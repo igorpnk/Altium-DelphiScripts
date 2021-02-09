@@ -1,15 +1,25 @@
 { PolygonReFitBO.pas
    from SolderMaskCopper02.pas
 
-   Modify selected polygon's outline to Board Outline.
-    or copy polygon outline to board outline
+   Modify selected polygon's outline to Board Outline by:-
+  -  copying the full board outline
+  -  clipping existing shape to board outline.
 
+  Or copy selected polygon outline to become the board outline
+   
 B. Miller
 12/05/2020  v0.10  POC
 13/05/2020  v0.11  Allow pre-selection of poly obj. Select object.
 12/07/2020  v0.12  Make board outline from selected polygon Outline.
 04/11/2020  v0.13  Clip Polygon to board outline shape.
 06/11/2020  v0.14  refactor 2 func into one fn.
+16/01/2021  v0.15  Over iterating Vertex lists. All zero refed.
+09/02/2021  v0.16  mapping vertexlist into Polygon segment must loop 0 to count
+
+tbd:  -- seems fixed..
+The region in new poly outline is not resetting vertice list / not refreshing completely.
+Opening properties vertix list is enought to fix.. grab handles in odd place or missing.
+     -- seems fixed..
  ..............................................................................}
 
 const
@@ -23,10 +33,10 @@ Var
    ReportLog    : TStringList;
 
 {..............................................................................}
-Function ClipPolygonToBoardOutline(Polygon : IPCB_Polygon) : boolean;
+Function ClipPolygonToBoardOutline(var Polygon : IPCB_Polygon) : boolean;
 Var
-    Layer  : TLayer;
-    PNet   : IPCB_Net;
+    Layer     : TLayer;
+    PNet      : IPCB_Net;
     I         : Integer;
     GMPC1     : IPCB_GeometricPolygon;
     GMPC2     : IPCB_GeometricPolygon;
@@ -34,7 +44,7 @@ Var
     ArcRes    : float;
     Expansion : TCoord;
     Operation : TSetOperation;
-    PolySeg : TPolySegment;
+    PolySeg   : TPolySegment;
 
 Begin
     Layer := Polygon.Layer;
@@ -51,13 +61,14 @@ Begin
     PcbServer.PCBContourUtilities.ClipSetSet (Operation, GMPC1, GMPC2, GMPC1);
     GPCVL := GMPC1.Contour(0);
 
-    PCBServer.SendMessageToRobots(Polygon.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+    PCBServer.PreProcess;
+    Polygon.BeginModify;
 
     PolySeg := TPolySegment;
+    PolySeg.Kind := ePolySegmentLine;
     Polygon.PointCount := GPCVL.Count;
-    For I := 0 To GPCVL.Count Do
+    For I := 0 To (GPCVL.Count) Do
     Begin
-        PolySeg.Kind := ePolySegmentLine;
         PolySeg.vx   := GPCVL.x(I);
         PolySeg.vy   := GPCVL.y(I);
         Polygon.Segments[I] := PolySeg;
@@ -67,70 +78,94 @@ Begin
     Polygon.SetState_CopperPourInvalid;
     Polygon.Rebuild;
     Polygon.CopperPourValidate;
+    Polygon.EndModify;
+//    Polygon.SetState_CopperPourValid;
 
-    PCBServer.SendMessageToRobots(Polygon.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
 //  required to get outline area to update!
     Polygon.GraphicallyInvalidate;
+    Polygon.SetState_XSizeYSize;
+    PCBServer.PostProcess;
 End;
 
-Function ModifyPolygonToBoardOutline(Polygon : IPCB_Polygon) : boolean;
+Function ModifyPolygonToBoardOutline(var Polygon : IPCB_Polygon) : boolean;
 Var
-    Layer : TLayer;
-    PNet  : IPCB_Net;
-    I     : Integer;
+    BOL     : IPCB_BoardOutline;
+    PolySeg : TPolySegment;
+    Layer   : TLayer;
+    PNet    : IPCB_Net;
+    I       : Integer;
 
 Begin
     Layer := Polygon.Layer;
-    ReportLog.Add('Modify Polygon: ''' + Polygon.Name + ''' on Layer ''' + cLayerStrings[Layer] + '''');
+    ReportLog.Add('Modify Polygon: ''' + Polygon.Name + ''' on Layer ''' + Layer2String(Layer) + '''');
 
-    PCBServer.SendMessageToRobots(Polygon.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+    BOL := Board.BoardOutline;
+    PCBServer.PreProcess;
+    Polygon.BeginModify;
 
-    Polygon.PointCount := Board.BoardOutline.PointCount;
-    For I := 0 To Board.BoardOutline.PointCount Do
-    Begin
-// if Board.BoardOutline.Segments[I].Kind = ePolySegmentLine then
-// current segment is a straight line.
-       Polygon.Segments[I] := Board.BoardOutline.Segments[I];
-    End;
+    PolySeg := TPolySegment;
+    Polygon.PointCount := BOL.PointCount;
+    for I := 0 To (BOL.PointCount) Do
+    begin
+       PolySeg := BOL.Segments(I);
+       Polygon.Segments(I) := PolySeg;
+    end;
 
     Polygon.SetState_CopperPourInvalid;
     Polygon.Rebuild;
     Polygon.CopperPourValidate;
+//    Polygon.SetState_CopperPourValid;
+    Polygon.EndModify;
 
-    PCBServer.SendMessageToRobots(Polygon.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+//    Polygon.FastSetState_XSizeYSize;
+    Polygon.SetState_XSizeYSize;
+    Polygon.BoundingRectangle;
 //  required to get outline area to update!
     Polygon.GraphicallyInvalidate;
+    PCBServer.PostProcess;
+    Result := true;
 End;
 
 Function ModifyBoardOutlineFromPolygonOutline(const Polygon : IPCB_Polygon, var Board : IPCB_Board) : boolean;
 Var
-    BOL   : IPCB_BoardOutline;
-    Layer : TLayer;
-    PNet  : IPCB_Net;
-    I     : Integer;
+    BOL     : IPCB_BoardOutline;
+    PolySeg : TPolySegment;
+    Layer   : TLayer;
+    PNet    : IPCB_Net;
+    I       : Integer;
 
 Begin
     Layer := Polygon.Layer;
     ReportLog.Add('Modify Board outline : ' + Board.FileName);
 
     BOL := Board.BoardOutline;
-    PCBServer.SendMessageToRobots(BOL.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+    PCBServer.PreProcess;
+    Board.BeginModify;
+    BOL.BeginModify;
 
+    PolySeg := TPolySegment;
     BOL.PointCount := Polygon.PointCount;
-    For I := 0 To Polygon.PointCount Do
+    For I := 0 To (Polygon.PointCount) Do
     Begin
-// if Board.BoardOutline.Segments[I].Kind = ePolySegmentLine then
-// current segment is a straight line.
-       BOL.Segments[I] := Polygon.Segments[I];
+// if .Segments[I].Kind = ePolySegmentLine then segment is a straight line.
+       PolySeg := Polygon.Segments(I);
+       BOL.Segments(I) := PolySeg;
     End;
 
-    BOL.SetState_CopperPourInvalid;
+    BOL.Invalidate;
+//    BOL.SetState_CopperPourInvalid;
     BOL.Rebuild;
-    BOL.CopperPourValidate;
+    BOL.Validate;
+    BOL.EndModify;
+//    BOL.CopperPourValidate;
 
-    PCBServer.SendMessageToRobots(BOL.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
-//  required to get outline area to update!
+    BOL.SetState_XSizeYSize;
+//  required to get outline area to update ?
     BOL.GraphicallyInvalidate;
+    Board.UpdateBoardOutline;
+    Board.EndModify;
+    Board.GraphicallyInvalidate;
+    PCBServer.PostProcess;
 End;
 
 {..............................................................................}
@@ -216,18 +251,13 @@ Begin
 End;
 
 Procedure ModifyPolygonOutline;
-var
-    Clip : boolean;
 begin
-    Clip := false;
-    ModifyPolyOutline(Clip);
+    ModifyPolyOutline(false);
 end;
+
 Procedure ClipPolygonOutline;
-var
-    Clip : boolean;
 begin
-    Clip := true;
-    ModifyPolyOutline(Clip);
+    ModifyPolyOutline(true);
 end;
 
 {..............................................................................}
@@ -266,7 +296,7 @@ Begin
     end;
 
     if Poly = nil then
-        Poly := Board.GetObjectAtCursor(MkSet(ePolyObject),SignalLayers,'Select polygon to Change Board Outline');
+        Poly := Board.GetObjectAtCursor(MkSet(ePolyObject),AllLayers,'Select polygon to Change Board Outline');
 
     if Poly <> nil then
     begin

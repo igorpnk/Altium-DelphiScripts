@@ -33,6 +33,7 @@ B. Miller
 07/02/2021  v1.03  add back the PasteMask code & fix Current Layer view.
 08/02/2021  v1.04  unused fn: MakeRegionFromPoly() fixed multi disconnected regions being one region esp. inverting.
 09/02/2021  v1.05  bug all Fill had MaskEnabled true.
+09/02/2021  v1.06  bad indexing in polyseg & vertixlists.
  ..............................................................................}
 
 Const
@@ -64,6 +65,7 @@ Var
    Board        : IPCB_Board;
    ReportLog    : TStringList;
    WSM          : IWorkSpace;
+   GUIMan       : IGUIManager;
    AExpansion   : TCoord;
 
 
@@ -93,6 +95,7 @@ Begin
     Board.AddPCBObject(Result);
     PCBServer.SendMessageToRobots(Result.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
     PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Result.I_ObjectAddress);
+    Result.GraphicallyInvalidate;
 End;
 
 Function AddPolygonToBoard(GPC : IPCB_GeometricPolygon; const PolygonName : WideString; PNet : IPCB_Net; Layer : TLayer, UIndex : integer) : IPCB_Polygon;
@@ -106,7 +109,7 @@ Begin
     ReportLog.Add('NewPolygon: ''' + PolygonName + ''' on Layer ''' + cLayerStrings[Layer] + '''');
     //Update so that Polygons always repour - avoids polygon repour yes/no dialog box popping up.
     PCBServer.SystemOptions.PolygonRepour := eAlwaysRepour;
-
+    PCBServer.PreProcess;
     Result := PCBServer.PCBObjectFactory(ePolyObject, eNoDimension, eCreate_Default);
     PCBServer.SendMessageToRobots(Result.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
     Result.Name                := PolygonName;
@@ -126,9 +129,9 @@ Begin
     Result.PointCount := GPCVL.Count;
 
     PolySeg := TPolySegment;
-    for I := 0 to GPCVL.Count do
+    PolySeg.Kind := ePolySegmentLine;
+    for I := 0 to (GPCVL.Count) do
     begin
-       PolySeg.Kind := ePolySegmentLine;
        PolySeg.vx   := GPCVL.x(I);
        PolySeg.vy   := GPCVL.y(I);
        Result.Segments[I] := PolySeg;
@@ -141,9 +144,10 @@ Begin
     Result.CopperPourValidate;
     Result.SetState_SolderMaskExpansionMode (eMaskExpansionMode_NoMask);
     Result.SetState_PasteMaskExpansionMode  (eMaskExpansionMode_NoMask);
-
     PCBServer.SendMessageToRobots(Result.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
     PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Result.I_ObjectAddress);
+    PCBServer.PostProcess;
+    Result.GraphicallyInvalidate;
 end;
 
 procedure SortPrimList(MOL : TObjectList);
@@ -162,8 +166,8 @@ begin
             Primitive2 := MOL.Items(J+1);
             for K := 0 to 1 do
             begin
-                if K = 0 then ObjectId := Primitive.ObjectId
-                else           ObjectId := Primitive2.ObjectId;
+                if (K = 0) then ObjectId := Primitive.ObjectId
+                else            ObjectId := Primitive2.ObjectId;
 
                 case ObjectID of
                 eTextObject   : Rank2 := 1;
@@ -185,9 +189,10 @@ end;
 Function MakeNewBoardOutlinePolygon(const PolygonName : string; Layer : TLayer; PNet : IPCB_Net) : IPCB_Polygon;
 Var
     I          : Integer;
+    PolySeg    : TPolySegment;
 
 Begin
-    ReportLog.Add('MakeNewPolygon: ''' + PolygonName + ''' on Layer ''' + cLayerStrings[Layer] + '''');
+    ReportLog.Add('MakeNewPolygon: ''' + PolygonName + ''' on Layer ''' + Layer2String(Layer) + '''');
 
     Result := PCBServer.PCBObjectFactory(ePolyObject, eNoDimension, eCreate_Default);
 
@@ -205,21 +210,23 @@ Begin
     Result.AvoidObsticles      := true; // false;
     Result.Net                 := PNet;
 
+    PolySeg := TPolySegment;
     Result.PointCount := Board.BoardOutline.PointCount;
-    For I := 0 To Board.BoardOutline.PointCount Do
+    For I := 0 To (Board.BoardOutline.PointCount) Do   // seems to need close the shape!
     Begin
 // if .Segments[I].Kind = ePolySegmentLine then is a straight line.
-       Result.Segments[I] := Board.BoardOutline.Segments[I];
+       PolySeg := Board.BoardOutline.Segments[I];
+       Result.Segments[I] := PolySeg;
     End;
 
     Board.AddPCBObject(Result);
-
     Result.SetState_CopperPourInvalid;
     Result.Rebuild;
     Result.CopperPourValidate;
 
     PCBServer.SendMessageToRobots(Result.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
     PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Result.I_ObjectAddress);
+    Result.GraphicallyInvalidate;
 End;
 
 function RegionArea(Region : IPCB_Region) : Double;
@@ -377,6 +384,7 @@ begin
 
                 PCBServer.SendMessageToRobots(NewRegion.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
                 PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, NewRegion.I_ObjectAddress);
+                NewRegion.GraphicallyInvalidate;
             end;
         end;
         CPOL.Clear;
@@ -391,7 +399,6 @@ end;
 Procedure MakeMechLayerMask(const Dummy : boolean; const Layer : TLayer; const InLayer : TLayer);
 Var
     RepourMode    : TPolygonRepourMode;
-    Stack         : IPCB_LayerStack;
     BoardIterator : IPCB_BoardIterator;
     Primitive     : IPCB_Primitive;
 
@@ -436,12 +443,14 @@ Var
     PolyLayer    : TLayer;
     LayerSet     : TSet;
     MAString     : String;
+    sStatusBar   : WideString;
 
 Begin
     // Retrieve the current board
     Board := PCBServer.GetCurrentPCBBoard;
     If Board = Nil Then Exit;
-    Stack := Board.LayerStack;
+
+GUIMan := Client.GUIManager;
 
     BeginHourGlass(crHourGlass);
 
@@ -504,7 +513,7 @@ Begin
     MaskObjList.Clear;
 
     BoardIterator := Board.BoardIterator_Create;
-    BoardIterator.AddFilter_ObjectSet(MkSet(ePadObject, eViaObject, eTrackObject, eArcObject, eRegionObject, eFillObject, eTextObject));   // (ePolyObject, eFillObject));
+    BoardIterator.AddFilter_ObjectSet(MkSet(ePadObject, eRegionObject));   // (ePolyObject, eFillObject));
     LayerSet := MkSet(Layer, InLayer, eMultiLayer);
     BoardIterator.AddFilter_LayerSet(AllLayers);
     BoardIterator.AddFilter_Method(eProcessAll);
@@ -572,9 +581,9 @@ Begin
               MakeRegion := False;
           end;
 
-          eRegionObject :    
+          eRegionObject :
           begin
-              Region := Primitive;     
+              Region := Primitive;
               MakeRegion := False;
 
 //       solid copper region
@@ -616,6 +625,8 @@ Begin
 
     For I := 0 to (MaskObjList.Count - 1) Do
     Begin
+        sStatusBar := ' processing : ' + IntToStr((I+1) / MaskObjList.Count * 100) + '% done';
+        GUIMan.StatusBar_SetState (1, sStatusBar);
         MakeRegion  := false;
         MaskEnabled := false;
 
