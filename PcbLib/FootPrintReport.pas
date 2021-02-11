@@ -31,6 +31,7 @@ Author BL Miller
 18/08/2020  v0.24  Support PcbDoc; Disable kind legend (redundant repeat info).
 19/08/2020  v0.25  Fix pad stack display for non stack FPs.
 05/01/2021  v0.26  Added paste shape size (rule & fixed exp.) & support for PcbDoc in PadReport.
+11/02/2021  v0.27  Added ReportBodies() list footprint patterns & comp body names.
 
 note: First 4 or 5 statements run in the top of main loop seem to prevent false stale info
 Paste mask shape may not return the minimal dimension.
@@ -62,117 +63,29 @@ const
 Var
     Doc           : IDocument;
     CurrentLib    : IPCB_Library;
-    CBoard         : IPCB_Board;
+    CBoard        : IPCB_Board;
+    PLayerSet     : IPCB_LayerSet;
     FPIterator    : IPCB_LibraryIterator;
     Iterator      : IPCB_GroupIterator;
     Prim          : IPCB_Primitive;
     Footprint     : IPCB_LibComponent;
+    FPName        : WideString;
+    FPPattern     : WideString;
     Rpt           : TStringList;
     FilePath      : WideString;
     MaxMechLayer  : integer;
     VerMajor      : WideString;
     IsLib         : boolean;
 
-function Version(const dummy : boolean) : TStringList;
-begin
-    Result               := TStringList.Create;
-    Result.Delimiter     := '.';
-    Result.Duplicates    := dupAccept;
-    Result.DelimitedText := Client.GetProductVersion;
-end;
+function Version(const dummy : boolean) : TStringList;                      forward;
+function ModelTypeToStr (ModType : T3DModelType) : WideString;              forward;
+procedure SaveReportLog(FileExt : WideString, const display : boolean);     forward;
+function GetCacheState (Value : TCacheState) : String;                      forward;
+function GetPlaneConnectionStyle (Value : TPlaneConnectionStyle) : String;  forward;
+function LayerKindToStr(LK : TMechanicalLayerKind) : WideString;            forward;
+function LayerToIndex(var PL : TParameterList, const L : TLayer) : integer; forward;
 
-procedure SaveReportLog(FileExt : WideString, const display : boolean);
-var
-    FileName : TPCBString;
-    SerDoc   : IServerDocument;
-begin
-//    FileName := ChangeFileExt(CBoard.FileName, FileExt);
-    FileName := ChangeFileExt(CBoard.FileName, FileExt);
-    Rpt.SaveToFile(Filename);
-    SerDoc  := Client.OpenDocument('Text', FileName);
-    If display and (SerDoc <> Nil) Then
-    begin
-        Client.ShowDocument(SerDoc);
-        if (SerDoc.GetIsShown <> 0 ) then
-            SerDoc.DoFileLoad;
-    end;
-end;
 {..................................................................................................}
-function GetCacheState (Value : TCacheState) : String;
-begin
-    Result := '?';
-    If Value = eCacheInvalid Then Result := 'Invalid';
-    If Value = eCacheValid   Then Result := 'Valid';
-    If Value = eCacheManual  Then Result := '''Manual''';
-end;
-{..................................................................................................}
-function GetPlaneConnectionStyle (Value : TPlaneConnectionStyle) : String;
-begin
-    Result := 'Unknown';
-    If Value = ePlaneNoConnect     Then Result := 'No Connect';
-    If Value = ePlaneReliefConnect Then Result := 'Relief';
-    If Value = ePlaneDirectConnect Then Result := 'Direct';
-end;
-{..................................................................................................}
-function LayerKindToStr(LK : TMechanicalLayerKind) : WideString;
-begin
-    case LK of
-    NoMechLayerKind : Result := 'Not Set';            // single
-    1               : Result := 'Assembly Top';
-    2               : Result := 'Assembly Bottom';
-    3               : Result := 'Assembly Notes';     // single
-    4               : Result := 'Board';
-    5               : Result := 'Coating Top';
-    6               : Result := 'Coating Bottom';
-    7               : Result := 'Component Center Top';
-    8               : Result := 'Component Center Bottom';
-    9               : Result := 'Component Outline Top';
-    10              : Result := 'Component Outline Bottom';
-    11              : Result := 'Courtyard Top';
-    12              : Result := 'Courtyard Bottom';
-    13              : Result := 'Designator Top';
-    14              : Result := 'Designator Bottom';
-    15              : Result := 'Dimensions';         // single
-    16              : Result := 'Dimensions Top';
-    17              : Result := 'Dimensions Bottom';
-    18              : Result := 'Fab Notes';         // single
-    19              : Result := 'Glue Points Top';
-    20              : Result := 'Glue Points Bottom';
-    21              : Result := 'Gold Plating Top';
-    22              : Result := 'Gold Plating Bottom';
-    23              : Result := 'Value Top';
-    24              : Result := 'Value Bottom';
-    25              : Result := 'V Cut';             // single
-    26              : Result := '3D Body Top';
-    27              : Result := '3D Body Bottom';
-    28              : Result := 'Route Tool Path';   // single
-    29              : Result := 'Sheet';             // single
-    else              Result := 'Unknown'
-    end;
-end;
-{..................................................................................................}
-function LayerToIndex(var PL : TParameterList, const L : TLayer) : integer;
-var
-   I    : integer;
-   PVal : integer;
-begin
-    Result := 0;
-// cache results to speed layer to index conversion
-    if not PL.GetState_ParameterAsInteger(L, PVal) then
-    begin
-        I := 1;
-        repeat
-            if LayerUtils.MechanicalLayer(I) = L then Result := I;
-            inc(I);
-            if I >  MaxMechLayer then break;
-        until Result <> 0;
-        PVal := Result;
-        PL.SetState_AddParameterAsInteger(L, PVal);
-    end
-    else
-        Result := PVal;
-end;
-
 procedure ReportLayersUsed;
 var
     LayerUsed    : Array [0..1025]; // of boolean;
@@ -193,8 +106,6 @@ var
     I, J      : integer;
     sLayer    : WideString;
     sKind     : WideString;
-    FPName    : WideString;
-    FPPattern : WideString;
     HoleSet   : TSet;
     LayerStack    : IPCB_LayerStack_V7;
     MechLayer     : IPCB_MechanicalLayer;
@@ -520,8 +431,6 @@ var
     PadCache     : TPadCache;
     PlanesArray  : TPlanesConnectArray;
     CPL          : WideString;
-    FPName       : WideString;
-    FPPattern    : WideString;
     Layer        : TLayer;
     NoOfPrims    : Integer;
     BR           : TCoordRect;
@@ -735,7 +644,6 @@ begin
                     Rpt.Add('   { Power Planes Connection Code (binary): ' + CPL + ' }');
                 end;
 
-
 //     CCWV - Relief Conductor Width valid ?
                 Rpt.Add('Relief Conductor Width Valid  CCWV : ' + GetCacheState(PadCache.ReliefConductorWidthValid) );
                 Rpt.Add('Relief Conductor Width        CCW  : ' + CoordUnitToString(PadCache.ReliefConductorWidth, Units) );
@@ -799,7 +707,236 @@ begin
 
     SaveReportLog('PadHoleReport.txt', true);
     Rpt.Free;
+end;
 
+procedure ReportBodies;
+var
+    CompBody     : IPCB_ComponentBody;
+    CompModel    : IPCB_Model;
+    ModType      : T3DModelType;
+    ModName      : WideString;
+    NoOfPrims    : Integer;
+begin
+    Doc := GetWorkSpace.DM_FocusedDocument;
+    if not (Doc.DM_DocumentKind = cDocKind_PcbLib) Then
+    begin
+         ShowMessage('No PcbLib selected. ');
+         Exit;
+    end;
+    IsLib  := false;
+    if (Doc.DM_DocumentKind = cDocKind_PcbLib) then
+    begin
+        CurrentLib := PCBServer.GetCurrentPCBLibrary;
+        CBoard := CurrentLib.Board;
+        IsLib := true;
+    end else
+        CBoard  := PCBServer.GetCurrentPCBBoard;
+
+    if (CBoard = nil) and (CurrentLib = nil) then
+    begin
+        ShowError('Failed to find PcbDoc or PcbLib.. ');
+        exit;
+    end;
+
+    BeginHourGlass(crHourGlass);
+    PLayerSet := LayerSetUtils.EmptySet;
+    PLayerSet.Include(eTopLayer);
+    PLayerSet.Include(eBottomLayer);
+
+    Rpt := TStringList.Create;
+    Rpt.Add(ExtractFileName(CBoard.FileName));
+    Rpt.Add('');
+    Rpt.Add('');
+    Rpt.Add('');
+
+    // For each page of library is a footprint
+    if IsLib then
+        FPIterator := CurrentLib.LibraryIterator_Create
+    else FPIterator := CBoard.BoardIterator_Create;
+    FPIterator.AddFilter_ObjectSet(MkSet(eComponentObject));
+    FPIterator.AddFilter_IPCB_LayerSet(PLayerSet);
+    if IsLib then
+        FPIterator.SetState_FilterAll
+    else
+        FPIterator.AddFilter_Method(eProcessAll);   // TIterationMethod { eProcessAll, eProcessFree, eProcessComponents }
+
+    Footprint := FPIterator.FirstPCBObject;
+    while Footprint <> Nil Do
+    begin
+       if IsLib then
+        begin
+            FPName    := Footprint.Name;
+            FPPattern := '';
+        end else
+        begin
+            FPName    := Footprint.Name.Text;
+            FPPattern := Footprint.Pattern;
+            FPName    := FPName + ' ' + FPPattern;
+        end;
+
+        if IsLib then
+        begin
+            CurrentLib.SetBoardToComponentByName(Footprint.Name) ;   // fn returns boolean
+//  this below line unselects selected objects;
+            CurrentLib.SetState_CurrentComponent (Footprint);
+            CurrentLib.RefreshView;
+        end;
+        CBoard.ViewManager_FullUpdate;
+
+        Iterator := Footprint.GroupIterator_Create;
+        Iterator.AddFilter_ObjectSet(MkSet(eComponentBodyObject));
+        Iterator.AddFilter_IPCB_LayerSet(LayerSetUtils.AllLayers);
+
+        NoOfPrims := 0;
+
+        CompBody := Iterator.FirstPCBObject;
+        while (CompBody <> Nil) Do
+        begin
+            CompModel := CompBody.Model;
+            if CompModel <> nil then
+            begin
+                Inc(NoOfPrims);
+                ModType := CompModel.ModelType;
+                ModName := CompBody.Identifier;  // CompModel.Name;
+                if (ModType = e3DModelType_Generic) then
+                    ModName := CompModel.FileName;
+
+                Rpt.Add(PadRight(IntToStr(NoOfPrims),2) + ' | ' + PadRight(FPName, 20) + ' | ' + PadRight(ModName, 20) + ' | ' + ModelTypeToString(ModType));
+            end;
+            CompBody := Iterator.NextPCBObject;
+        end;
+
+        Rpt.Add('');
+
+        Footprint.GroupIterator_Destroy(Iterator);
+        Footprint := FPIterator.NextPCBObject;
+    end;
+
+    if IsLib then
+        CurrentLib.LibraryIterator_Destroy(FPIterator)
+    else CBoard.BoardIterator_Destroy(FPIterator);
+
+    if IsLib then CurrentLib.Navigate_FirstComponent;
+    CBoard.GraphicalView_ZoomRedraw;
+    if IsLib then CurrentLib.RefreshView;
+
+    EndHourGlass;
+
+    SaveReportLog('FPBodyReport.txt', true);
+    Rpt.Free;
+end;
+{..................................................................................................}
+{..................................................................................................}
+function ModelTypeToStr (ModType : T3DModelType) : WideString;
+begin
+    Case ModType of
+        0                     : Result := 'Extruded';            // AD19 defines e3DModelType_Extrude but not work.
+        e3DModelType_Generic  : Result := 'Generic Model';
+        2                     : Result := 'Cylinder';
+        3                     : Result := 'Sphere';
+    else
+        Result := 'unknown';
+    end;
+end;
+{..................................................................................................}
+function Version(const dummy : boolean) : TStringList;
+begin
+    Result               := TStringList.Create;
+    Result.Delimiter     := '.';
+    Result.Duplicates    := dupAccept;
+    Result.DelimitedText := Client.GetProductVersion;
+end;
+{..................................................................................................}
+procedure SaveReportLog(FileExt : WideString, const display : boolean);
+var
+    FileName : TPCBString;
+    SerDoc   : IServerDocument;
+begin
+//    FileName := ChangeFileExt(CBoard.FileName, FileExt);
+    FileName := ChangeFileExt(CBoard.FileName, FileExt);
+    Rpt.SaveToFile(Filename);
+    SerDoc  := Client.OpenDocument('Text', FileName);
+    If display and (SerDoc <> Nil) Then
+    begin
+        Client.ShowDocument(SerDoc);
+        if (SerDoc.GetIsShown <> 0 ) then
+            SerDoc.DoFileLoad;
+    end;
+end;
+{..................................................................................................}
+function LayerKindToStr(LK : TMechanicalLayerKind) : WideString;
+begin
+    case LK of
+    NoMechLayerKind : Result := 'Not Set';            // single
+    1               : Result := 'Assembly Top';
+    2               : Result := 'Assembly Bottom';
+    3               : Result := 'Assembly Notes';     // single
+    4               : Result := 'Board';
+    5               : Result := 'Coating Top';
+    6               : Result := 'Coating Bottom';
+    7               : Result := 'Component Center Top';
+    8               : Result := 'Component Center Bottom';
+    9               : Result := 'Component Outline Top';
+    10              : Result := 'Component Outline Bottom';
+    11              : Result := 'Courtyard Top';
+    12              : Result := 'Courtyard Bottom';
+    13              : Result := 'Designator Top';
+    14              : Result := 'Designator Bottom';
+    15              : Result := 'Dimensions';         // single
+    16              : Result := 'Dimensions Top';
+    17              : Result := 'Dimensions Bottom';
+    18              : Result := 'Fab Notes';         // single
+    19              : Result := 'Glue Points Top';
+    20              : Result := 'Glue Points Bottom';
+    21              : Result := 'Gold Plating Top';
+    22              : Result := 'Gold Plating Bottom';
+    23              : Result := 'Value Top';
+    24              : Result := 'Value Bottom';
+    25              : Result := 'V Cut';             // single
+    26              : Result := '3D Body Top';
+    27              : Result := '3D Body Bottom';
+    28              : Result := 'Route Tool Path';   // single
+    29              : Result := 'Sheet';             // single
+    else              Result := 'Unknown'
+    end;
+end;
+{..................................................................................................}
+function LayerToIndex(var PL : TParameterList, const L : TLayer) : integer;
+var
+   I    : integer;
+   PVal : integer;
+begin
+    Result := 0;
+// cache results to speed layer to index conversion
+    if not PL.GetState_ParameterAsInteger(L, PVal) then
+    begin
+        I := 1;
+        repeat
+            if LayerUtils.MechanicalLayer(I) = L then Result := I;
+            inc(I);
+            if I >  MaxMechLayer then break;
+        until Result <> 0;
+        PVal := Result;
+        PL.SetState_AddParameterAsInteger(L, PVal);
+    end
+    else
+        Result := PVal;
+end;
+{..................................................................................................}
+function GetCacheState (Value : TCacheState) : String;
+begin
+    Result := '?';
+    If Value = eCacheInvalid Then Result := 'Invalid';
+    If Value = eCacheValid   Then Result := 'Valid';
+    If Value = eCacheManual  Then Result := '''Manual''';
+end;
+{..................................................................................................}
+function GetPlaneConnectionStyle (Value : TPlaneConnectionStyle) : String;
+begin
+    Result := 'Unknown';
+    If Value = ePlaneNoConnect     Then Result := 'No Connect';
+    If Value = ePlaneReliefConnect Then Result := 'Relief';
+    If Value = ePlaneDirectConnect Then Result := 'Direct';
 end;
 
 {
