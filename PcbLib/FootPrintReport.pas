@@ -32,6 +32,7 @@ Author BL Miller
 19/08/2020  v0.25  Fix pad stack display for non stack FPs.
 05/01/2021  v0.26  Added paste shape size (rule & fixed exp.) & support for PcbDoc in PadReport.
 11/02/2021  v0.27  Added ReportBodies() list footprint patterns & comp body names.
+12/02/2021  v0.28  Improve? formatting ReportBodies() add extra info
 
 note: First 4 or 5 statements run in the top of main loop seem to prevent false stale info
 Paste mask shape may not return the minimal dimension.
@@ -130,7 +131,7 @@ begin
     end else
         CBoard  := PCBServer.GetCurrentPCBBoard;
 
-    if (CBoard = nil) and (CurrentLib = nil) then
+    if ((CBoard = nil) and (CurrentLib = nil)) then
     begin
         ShowError('Failed to find PcbDoc or PcbLib.. ');
         exit;
@@ -715,12 +716,15 @@ var
     CompModel    : IPCB_Model;
     ModType      : T3DModelType;
     ModName      : WideString;
+    CompModelId  : WideString;
+    MOrigin      : TCoordPoint;
+    ModRot       : TAngle;
     NoOfPrims    : Integer;
 begin
     Doc := GetWorkSpace.DM_FocusedDocument;
-    if not (Doc.DM_DocumentKind = cDocKind_PcbLib) Then
+    if not ((Doc.DM_DocumentKind = cDocKind_PcbLib) or (Doc.DM_DocumentKind = cDocKind_Pcb)) Then
     begin
-         ShowMessage('No PcbLib selected. ');
+         ShowMessage('No PcbDoc or PcbLib selected. ');
          Exit;
     end;
     IsLib  := false;
@@ -747,6 +751,8 @@ begin
     Rpt.Add(ExtractFileName(CBoard.FileName));
     Rpt.Add('');
     Rpt.Add('');
+    Rpt.Add(PadRight('n',2) + ' | ' + PadRight('Footprint', 20) + ' | ' + PadRight('Identifier', 20) + ' | ' + PadRight('ModelName', 24) + ' | ' + PadRight('ModelType',12)
+            + ' | ' + PadLeft('X',10) + ' | ' + PadLeft('Y',10) + ' | Ang ' );
     Rpt.Add('');
 
     // For each page of library is a footprint
@@ -774,7 +780,7 @@ begin
             FPName    := FPName + ' ' + FPPattern;
         end;
 
-        if IsLib then
+{        if IsLib then
         begin
             CurrentLib.SetBoardToComponentByName(Footprint.Name) ;   // fn returns boolean
 //  this below line unselects selected objects;
@@ -782,7 +788,7 @@ begin
             CurrentLib.RefreshView;
         end;
         CBoard.ViewManager_FullUpdate;
-
+}
         Iterator := Footprint.GroupIterator_Create;
         Iterator.AddFilter_ObjectSet(MkSet(eComponentBodyObject));
         Iterator.AddFilter_IPCB_LayerSet(LayerSetUtils.AllLayers);
@@ -796,12 +802,16 @@ begin
             if CompModel <> nil then
             begin
                 Inc(NoOfPrims);
-                ModType := CompModel.ModelType;
-                ModName := CompBody.Identifier;  // CompModel.Name;
+                ModType     := CompModel.ModelType;
+                MOrigin     := CompModel.Origin;
+                ModRot      := CompModel.Rotation;
+                CompModelId := CompBody.Identifier;
+                ModName := CompModel.Name;
                 if (ModType = e3DModelType_Generic) then
                     ModName := CompModel.FileName;
 
-                Rpt.Add(PadRight(IntToStr(NoOfPrims),2) + ' | ' + PadRight(FPName, 20) + ' | ' + PadRight(ModName, 20) + ' | ' + ModelTypeToString(ModType));
+                Rpt.Add(PadRight(IntToStr(NoOfPrims),2) + ' | ' + PadRight(FPName, 20) + ' | ' + PadRight(CompModelId, 20) + ' | ' + PadRight(ModName, 24) + ' | ' + PadRight(ModelTypeToStr(ModType), 12)
+                        + ' | ' + PadLeft(IntToStr(MOrigin.X),10) + ' | ' + PadLeft(IntToStr(MOrigin.Y),10) + ' | ' + FloatToStr(ModRot) );
             end;
             CompBody := Iterator.NextPCBObject;
         end;
@@ -831,7 +841,7 @@ function ModelTypeToStr (ModType : T3DModelType) : WideString;
 begin
     Case ModType of
         0                     : Result := 'Extruded';            // AD19 defines e3DModelType_Extrude but not work.
-        e3DModelType_Generic  : Result := 'Generic Model';
+        e3DModelType_Generic  : Result := 'Generic';
         2                     : Result := 'Cylinder';
         3                     : Result := 'Sphere';
     else
