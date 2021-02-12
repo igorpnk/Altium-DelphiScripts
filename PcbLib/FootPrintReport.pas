@@ -32,7 +32,8 @@ Author BL Miller
 19/08/2020  v0.25  Fix pad stack display for non stack FPs.
 05/01/2021  v0.26  Added paste shape size (rule & fixed exp.) & support for PcbDoc in PadReport.
 11/02/2021  v0.27  Added ReportBodies() list footprint patterns & comp body names.
-12/02/2021  v0.28  Improve? formatting ReportBodies() add extra info
+12/02/2021  v0.28  Improve? formating ReportBodies() add extra info
+12/02/2021  v0.29  Overwrite CBody Id with FP name (if blank) CBody.Name & Model.Name just useless
 
 note: First 4 or 5 statements run in the top of main loop seem to prevent false stale info
 Paste mask shape may not return the minimal dimension.
@@ -716,6 +717,7 @@ var
     CompModel    : IPCB_Model;
     ModType      : T3DModelType;
     ModName      : WideString;
+    CBodyName    : WideString;
     CompModelId  : WideString;
     MOrigin      : TCoordPoint;
     ModRot       : TAngle;
@@ -799,6 +801,7 @@ begin
         while (CompBody <> Nil) Do
         begin
             CompModel := CompBody.Model;
+            CBodyName := CompBody.Name;                      // ='' for all 3d comp body
             if CompModel <> nil then
             begin
                 Inc(NoOfPrims);
@@ -806,7 +809,11 @@ begin
                 MOrigin     := CompModel.Origin;
                 ModRot      := CompModel.Rotation;
                 CompModelId := CompBody.Identifier;
-                ModName := CompModel.Name;
+                if CompModelId = '' then  CompBody.SetState_Identifier(FPName);
+
+                ModName := CBodyName;
+           //     CompModel.Name := FPName;
+           //     CompBody.Name  := FPName;
                 if (ModType = e3DModelType_Generic) then
                     ModName := CompModel.FileName;
 
