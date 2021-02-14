@@ -34,6 +34,7 @@ Author BL Miller
 11/02/2021  v0.27  Added ReportBodies() list footprint patterns & comp body names.
 12/02/2021  v0.28  Improve? formating ReportBodies() add extra info
 12/02/2021  v0.29  Overwrite CBody Id with FP name (if blank) CBody.Name & Model.Name just useless
+14/02/2021  v0.30  ReportBodies() need to make each FP "current" to get the correct origin data
 
 note: First 4 or 5 statements run in the top of main loop seem to prevent false stale info
 Paste mask shape may not return the minimal dimension.
@@ -66,11 +67,12 @@ Var
     Doc           : IDocument;
     CurrentLib    : IPCB_Library;
     CBoard        : IPCB_Board;
-    PLayerSet     : IPCB_LayerSet;
+    BOrigin      : TCoordPoint;
     FPIterator    : IPCB_LibraryIterator;
     Iterator      : IPCB_GroupIterator;
     Prim          : IPCB_Primitive;
     Footprint     : IPCB_LibComponent;
+    PLayerSet     : IPCB_LayerSet;
     FPName        : WideString;
     FPPattern     : WideString;
     Rpt           : TStringList;
@@ -437,7 +439,6 @@ var
     NoOfPrims    : Integer;
     BR           : TCoordRect;
     FPCoG        : TCoordPoint;
-    BOrigin      : TCoordPoint;
     BWOrigin     : TCoordPoint;
     TestPoint    : TPoint;
     BadFPList    : TStringList;
@@ -745,6 +746,7 @@ begin
     end;
 
     BeginHourGlass(crHourGlass);
+    BOrigin  := Point(CBoard.XOrigin,      CBoard.YOrigin     );  // abs Tcoord
     PLayerSet := LayerSetUtils.EmptySet;
     PLayerSet.Include(eTopLayer);
     PLayerSet.Include(eBottomLayer);
@@ -775,6 +777,7 @@ begin
         begin
             FPName    := Footprint.Name;
             FPPattern := '';
+            CurrentLib.SetState_CurrentComponent (Footprint)      // to make origin correct.
         end else
         begin
             FPName    := Footprint.Name.Text;
@@ -782,15 +785,6 @@ begin
             FPName    := FPName + ' ' + FPPattern;
         end;
 
-{        if IsLib then
-        begin
-            CurrentLib.SetBoardToComponentByName(Footprint.Name) ;   // fn returns boolean
-//  this below line unselects selected objects;
-            CurrentLib.SetState_CurrentComponent (Footprint);
-            CurrentLib.RefreshView;
-        end;
-        CBoard.ViewManager_FullUpdate;
-}
         Iterator := Footprint.GroupIterator_Create;
         Iterator.AddFilter_ObjectSet(MkSet(eComponentBodyObject));
         Iterator.AddFilter_IPCB_LayerSet(LayerSetUtils.AllLayers);
@@ -818,7 +812,7 @@ begin
                     ModName := CompModel.FileName;
 
                 Rpt.Add(PadRight(IntToStr(NoOfPrims),2) + ' | ' + PadRight(FPName, 20) + ' | ' + PadRight(CompModelId, 20) + ' | ' + PadRight(ModName, 24) + ' | ' + PadRight(ModelTypeToStr(ModType), 12)
-                        + ' | ' + PadLeft(IntToStr(MOrigin.X),10) + ' | ' + PadLeft(IntToStr(MOrigin.Y),10) + ' | ' + FloatToStr(ModRot) );
+                        + ' | ' + PadLeft(IntToStr(MOrigin.X-BOrigin.X),10) + ' | ' + PadLeft(IntToStr(MOrigin.Y-BOrigin.Y),10) + ' | ' + FloatToStr(ModRot) );
             end;
             CompBody := Iterator.NextPCBObject;
         end;
