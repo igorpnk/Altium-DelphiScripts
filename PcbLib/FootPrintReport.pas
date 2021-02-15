@@ -88,6 +88,8 @@ function GetCacheState (Value : TCacheState) : String;                      forw
 function GetPlaneConnectionStyle (Value : TPlaneConnectionStyle) : String;  forward;
 function LayerKindToStr(LK : TMechanicalLayerKind) : WideString;            forward;
 function LayerToIndex(var PL : TParameterList, const L : TLayer) : integer; forward;
+procedure ReportTheBodies(const fix : boolean);                                forward;
+
 
 {..................................................................................................}
 procedure ReportLayersUsed;
@@ -713,6 +715,15 @@ begin
 end;
 
 procedure ReportBodies;
+begin
+    ReportTheBodies(false);
+end
+procedure FixAndReportBodyId;
+begin
+    ReportTheBodies(true);
+end;
+
+procedure ReportTheBodies(const fix : boolean);
 var
     CompBody     : IPCB_ComponentBody;
     CompModel    : IPCB_Model;
@@ -803,7 +814,9 @@ begin
                 MOrigin     := CompModel.Origin;
                 ModRot      := CompModel.Rotation;
                 CompModelId := CompBody.Identifier;
-                if CompModelId = '' then  CompBody.SetState_Identifier(FPName);
+                if (Fix) then
+                if (CompModelId = '') then  CompBody.SetState_Identifier(FPName);
+                CompModelId := CompBody.Identifier;
 
                 ModName := CBodyName;
            //     CompModel.Name := FPName;
