@@ -717,7 +717,7 @@ end;
 procedure ReportBodies;
 begin
     ReportTheBodies(false);
-end
+end;
 procedure FixAndReportBodyId;
 begin
     ReportTheBodies(true);
