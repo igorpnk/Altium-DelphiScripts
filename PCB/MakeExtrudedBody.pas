@@ -8,6 +8,7 @@
 25/09/2020 v0.01 POC working.
 26/09/2020 v0.10 use PCB current layer for new model if is Mechanical else use defined const iMechLayer
 06/11/2020 v0.20 added support for output Regions onto any current layer
+05/03/2021 v0.21 Can pre-select (multiple obj) or run with no selection (single obj); works in PcbLib.
 
 Units for IPCB_Model are MickeyMouse(TM)
 
@@ -29,6 +30,8 @@ Const
 
 Var
    WSM             : IWorkSpace;
+   Doc             : IDocument;
+   CurrentLib      : IPCB_Library;
    Board           : IPCB_Board;
    BUnits          : TUnit;
    BOrigin         : TCoordPoint;
@@ -146,7 +149,7 @@ begin
 
     GMPC1 := PcbServer.PCBGeometricPolygonFactory;
 
-//    PcbServer.PCBContourMaker.ArcResolution := MilsToCoord(0.5); // very strange result if > 1
+//    PcbServer.PCBContourMaker.SetState_ArcResolution := MilsToCoord(0.5); // very strange result if > 1
     PCBServer.PCBContourMaker.SetState_ArcResolution(MilsToCoord(ArcResolution));
 
     for I := 0 to (MaskObjList.Count - 1) Do
@@ -160,7 +163,8 @@ begin
                 eRegionObject :
                 begin
                     Region := Primitive;
-                    if (Region.Kind = eRegionKind_Copper) and not (Region.InPolygon or Region.IsKeepout ) then  //  and Region.InComponent
+//                    if (Region.Kind = eRegionKind_Copper) and not (Region.InPolygon or Region.IsKeepout ) then  //  and Region.InComponent
+                    if not Region.InPolygon then
                     begin
                         GMPC1 := PcbServer.PCBContourMaker.MakeContour(Region, Expansion, Layer);
                         Result.Add(GMPC1);
@@ -231,14 +235,35 @@ Var
     MLayer         : IPCB_MechanicalLayer;
     I, J, K        : Integer;
     MaskObjList    : TObjectList;
+    PObjSet        : TSet;
     UnionIndex     : integer;
     FYI            : WideString;
+    IsLib          : boolean;
     HasHoles       : boolean;
     dConfirm       : boolean;
 
 begin
-    Board := PCBServer.GetCurrentPCBBoard;
-    If Board = Nil Then Exit;
+    Doc := GetWorkSpace.DM_FocusedDocument;
+    if not ((Doc.DM_DocumentKind = cDocKind_PcbLib) or (Doc.DM_DocumentKind = cDocKind_Pcb)) Then
+    begin
+         ShowMessage('No PcbDoc or PcbLib selected. ');
+         Exit;
+    end;
+    IsLib  := false;
+    if (Doc.DM_DocumentKind = cDocKind_PcbLib) then
+    begin
+        CurrentLib := PCBServer.GetCurrentPCBLibrary;
+        Board := CurrentLib.Board;
+        IsLib := true;
+    end else
+        Board  := PCBServer.GetCurrentPCBBoard;
+
+    if ((Board = nil) and (CurrentLib = nil)) then
+    begin
+        ShowError('Failed to find PcbDoc or PcbLib.. ');
+        exit;
+    end;
+
     BOrigin := Point(Board.XOrigin, Board.YOrigin);
     BUnits := Board.DisplayUnit;
     if (BUnits = eImperial) then BUnits := eMetric
@@ -252,35 +277,31 @@ begin
 // code for using const defined layer   hint: make Layer := ML !!
     ML     := LayerUtils.MechanicalLayer(iMechLayer);
     MLayer := Board.LayerStack_V7.LayerObject_V7[ML];
-    Layer  := Board.CurrentLayer;
-
+    Layer  := Board.CurrentLayer;        // ML;
 
 // only allow ComponentBody on Mechanical layer
     if (Shape = olBody) then
-    begin
         if not LayerUtils.IsMechanicalLayer((Layer)) then
             Layer := ML;
-    end;
-
-   //   make a primitive object list & then loop & test & generate contours.
-    MaskObjList.Clear;
 
 // support regions & polygon regions (exclude keepouts?)
-    BoardIterator := Board.BoardIterator_Create;
-    BoardIterator.AddFilter_ObjectSet(MkSet(eRegionObject, ePolyObject));
-    BoardIterator.AddFilter_LayerSet(AllLayers);      // MkSet(Layer));   added Vias!
-    BoardIterator.AddFilter_Method(eProcessAll);
+    PObjSet := MkSet(eRegionObject, ePolyObject);
 
-    Primitive := BoardIterator.FirstPCBObject;
-    while (Primitive <> Nil) do
+// make a primitive object list & then loop & test & generate contours.
+    MaskObjList.Clear;
+
+    for I := 0 to (Board.SelectedObjectsCount - 1) do
     begin
-        if Primitive.Selected then
-        begin
+        Primitive := Board.SelectecObject(I);
+        if InSet(Primitive.ObjectId, PObjSet ) then
             MaskObjList.Add(Primitive);
-        end;
-        Primitive := BoardIterator.NextPCBObject;
     end;
-    Board.BoardIterator_Destroy(BoardIterator);
+
+    if (MaskObjList.Count = 0) then
+    begin
+        Primitive := Board.GetObjectAtCursor(PObjSet, SignalLayers, 'Choose Poly/Region ');
+        if Primitive <> nil then MaskObjList.Add(Primitive);
+    end;
 
     Expansion := MilsToCoord(OutlineExpansion);
     GPOL := MakeContourShapes(MaskObjList, 0, Layer, Expansion);
@@ -324,7 +345,10 @@ begin
     end;
     GPOL.Clear;
 
-    Client.SendMessage('PCB:SetCurrentLayer', 'Layer=' + IntToStr(Layer) , 255, Client.CurrentView);
+    Board.CurrentLayer := Layer;
+//    Client.SendMessage('PCB:SetCurrentLayer', 'Layer=' + IntToStr(Layer) , 255, Client.CurrentView);
+    Board.ViewManager_UpdateLayerTabs;
+    Client.SendMessage('PCB:Zoom', 'Action=Redraw', 255, Client.CurrentView);
     SaveReportLog('-MExBody.txt', false);
 end;
 
