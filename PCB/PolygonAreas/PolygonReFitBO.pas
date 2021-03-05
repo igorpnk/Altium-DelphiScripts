@@ -18,7 +18,7 @@ B. Miller
 
 tbd:  -- seems fixed..
 The region in new poly outline is not resetting vertice list / not refreshing completely.
-Opening properties vertix list is enought to fix.. grab handles in odd place or missing.
+Opening properties vertex list is enough to fix.. grab handles in odd place or missing.
      -- seems fixed..
  ..............................................................................}
 
