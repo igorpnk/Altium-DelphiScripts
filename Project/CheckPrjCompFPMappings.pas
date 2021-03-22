@@ -1,13 +1,17 @@
-{..............................................................................
- Summary 
-         Project focused comparison of FP model names & paths & parameters
+{  CheckPrjCompFPMappings.pas
+
+ Summary
+         Project focused comparison of component FP model names & paths & parameters
          Uses Project Component mapping etc
-         Reports unmapped comps in Sch & PCB      
+         Reports unmapped comps in Sch & PCB
+         Reports missing paramters
+         Reports parameters with different values.
+         Navigate components using the Messages Panel.
 
          Uses Board iterator method to check Prj/Sch footprint source matches FPcomponent source !!
          Footprints should be sourced from same IntLib as component symbols.
          System like parameters in SchDoc/Prj component are ignored.
-         Extra parameters in PCB FP component are ignored
+         Extra (system) parameters in PCB FP component are ignored
 
 B. Miller
 21/08/2018  v0.1  intial
@@ -16,12 +20,15 @@ B. Miller
 08/02/2020  v0.31 Fix check all parameters & go back to old PCB iterator method for library checks.
                   CompImpl.DM_DatafileLibraryIdentifier(0) does not work for all comps.
 09/02/2020  v0.32 Compare designators, add startup helper messages, refresh report doc view.
+31/08/2020  v0.33 changed libMessage.pas proc names.
+23/03/2021  v0.34 ditto prefix libM_, removed MMPanel declarative to the lib.
 
 
 ..............................................................................}
+uses
+    {..\..\Common\} libMessage.pas;
 
 Const
-    InIntLib = True;
   //Constants used in the messages panel
     IMG_Wire       = 1;
     IMG_Component  = 2;
@@ -36,8 +43,7 @@ Const
     cIconInfo        = 107;
 
 Var
-    IntLibMan  : IIntegratedLibraryManager;
-    MMPanel    : IMessagesManager;
+//    IntLibMan  : IIntegratedLibraryManager;
     MMessage   : WideString;
     MSource    : WideString;
     MMObjAddr  : Integer;
@@ -48,104 +54,14 @@ Var
     PrjMapping : IComponentMappings;
     Board      : IPCB_Board;
     PrjReport  : TStringList;
-    PCBList    : TStringList;
     FilePath   : WideString;
     FileName   : WideString;
 
-Function BooleanToString (Value : LongBool) : String;
-Begin
-    Result := 'True';
-
-    If Value = True Then Result := 'True'
-                    Else Result := 'False';
-End;
 {..............................................................................}
 
-{ some of SchDoc/Prj component paramters are not same in PCb footprint comp }
-function CheckIgnoreParameter(PName : WideString) : boolean;
-begin
-    Result := false;
-    PName := Trim(PName);
-    case PName of
-    'Component Kind'    :
-        Result := true;
-    'Component Type'    :
-        Result := true;
-    'Description'       :
-        Result := true;
-//    'Designator'        :
-//        Result := false;    // true;
-    'Footprint'         :
-        Result := true;
-    'Library Name'      :
-        Result := true;
-    'Library Reference' :
-        Result := true;
-    'Pin Count'         :
-        Result := true;
-    'PCB3D'             :
-        Result := true;
-    'Ibis Model'        :
-        Result := true;
-    'Signal Integrity'  :
-        Result := true;
-    'Simulation'        :
-        Result := true;
-    end;
-end;
-
-function FindParameterValue(Comp : IComponent, PName : WideString) : WideString;
-var
-    I       : integer;
-    Param   : IParameter;
-    bFound  : boolean;
-
-begin
-    Result := '';
-    I := 0;
-    bFound := false;
-
-    while (not bFound) and (I < (Comp.DM_ParameterCount) ) do
-    begin
-        Param := Comp.DM_Parameters(I);
-        if SameString(Param.DM_Name, PName, False) then
-        begin
-            bFound := true;
-            Result := Param.DM_Value;
-        end;
-        Inc(I);
-    end;
-end;
-
-function FindPCBComponent(Comp : IComponent) : IPCB_Component;
-var
-    PCBComp        : IPCB_Component;
-    Iterator       : IPCB_BoardIterator;
-    bFound         : boolean;
-begin
-    Result := nil;
-    If Board = Nil Then Exit;
-
-    Iterator := Board.BoardIterator_Create;
-    Iterator.AddFilter_ObjectSet(MkSet(eComponentObject));
-    Iterator.AddFilter_IPCB_LayerSet(MkSet(eTopLayer,eBottomLayer));
-    Iterator.AddFilter_Method(eProcessAll);
-
-    bFound := false;
-
-    PCBComp := Iterator.FirstPCBObject;
-
-    while (not bFound) and (PCBComp <> Nil) Do
-    begin
-        if Comp.DM_UniqueId = PCBComp.SourceUniqueID then
-        begin
-            Result := PCBComp;
-            bFound := true;
-        end;
-        PCBComp := Iterator.NextPCBObject;
-    End;
-    Board.BoardIterator_Destroy(Iterator);
-end;
+function CheckIgnoreParameter(PName : WideString) : boolean;                     forward;
+function FindParameterValue(Comp : IComponent, PName : WideString) : WideString; forward;
+function FindPCBComponent(Comp : IComponent) : IPCB_Component;                   forward;
 
 Procedure ReportCompMappings;
 var
@@ -188,10 +104,12 @@ Begin
         Exit;
     end;
 
-    Prj.DM_Compile;
+    BeginHourGlass(crHourGlass);
 
-    IntLibMan := IntegratedLibraryManager;
-    If IntLibMan = Nil Then Exit;
+// scripting API seems unable to take advantage of cached project compile.
+// could test with if Doc.DM_ComponentCount = 0 then Compiled := false;
+    if (Prj.DM_NeedsCompile = -1) then        // Compiled := false;
+        Prj.DM_Compile;
 
     PrimDoc := Prj.DM_PrimaryImplementationDocument;
     if PrimDoc = Nil then
@@ -215,13 +133,12 @@ Begin
 // for the DMObject Componentmapping interface
     PrjMapping := Prj.DM_ComponentMappings(PrimDoc.DM_FullPath);
 
-    MMPanel := WS.DM_MessagesManager;
-    MMPanel.ClearMessages;
+    WS.DM_MessagesManager.ClearMessages;
     WS.DM_ShowMessageView;
 
     MSource := 'CheckPrjCompFPMappings (CPCFM) script';
     MMessage := 'Check-Project-Component-FootPrint-Mappings script started';
-    AddMessage(MMPanel,'[Info]',MMessage ,MSource , Prj.DM_ProjectFileName, '', '', cIconInfo);
+    libM_AddMessage('[Info]',MMessage ,MSource , Prj.DM_ProjectFileName, '', '', cIconInfo);
     WS.DM_ShowMessageView;
 
     BeginHourGlass(crHourGlass);
@@ -236,11 +153,12 @@ Begin
     PrjReport.Add('Project Footprint Model information:');
     PrjReport.Add('  Project: ' + Prj.DM_ProjectFileName);
     PrjReport.Add('');
-    PrjReport.Add('Usable Libraries installed :-');
 
+{
+    PrjReport.Add('Usable Libraries installed :-');
     for I := 0 to (IntLibMan.InstalledLibraryCount - 1) Do
     begin
-        case LibraryType(IntLibMan.InstalledLibraryPath(I)) of       // fn from common libIntLibMan.pas
+        case libILM_LibraryType(IntLibMan.InstalledLibraryPath(I)) of       // fn from common libIntLibMan.pas
             eLibIntegrated : SMess := 'Integrated Lib : ';
             eLibDatabase   : SMess := 'dBase Library  : ';
 // TLibraryType = (eLibIntegrated, eLibSource, eLibDatafile, eLibDatabase, eLibNone, eLibQuery, eLibDesignItems);
@@ -249,7 +167,7 @@ Begin
         end;
         PrjReport.Add(PadRight(SMess, 20) + IntLibMan.InstalledLibraryPath(I));
     end;
-
+}
     TotLLinkCount :=0;
     TotFLinkCount :=0;
 
@@ -268,8 +186,8 @@ Begin
                           + '  ' + Comp.DM_LibraryReference);
             MMObjAddr := Comp.DM_ObjectAdress;
             MMessage := 'UnMatched Sch Component  : '+ IntToStr(I) + ' | ' + Comp.DM_FullLogicalDesignatorForDisplay + ' | ' + Comp.DM_LibraryReference;
-            //                                                            'CrossProbeConnective=' + IntToStr(MMObjAddr)
-            AddMessage(MMPanel, '[Info]', MMessage , MSource, Comp.DM_OwnerDocumentFullPath, 'WorkspaceManager:View', 'CrossProbeConnective=' + IntToStr(MMObjAddr), IMG_Component);
+                                                           // .DM_OwnerDocumentFullPath
+            libM_AddMessage('[Info]', MMessage , MSource, Comp.DM_OwnerDocumentName, 'WorkspaceManager:View', 'CrossProbeConnective=' + IntToStr(MMObjAddr), IMG_Component);
         end;
 
         for I := 0 to (PrjMapping.DM_UnmatchedTargetComponentCount - 1) do
@@ -286,7 +204,7 @@ Begin
             if PCBComp <> nil then
                 MMessage := MMessage + ' | ' + PCBComp.SourceFootprintLibrary;   //  FindParameterValue(Comp , 'Library Name');
 
-            AddMessage(MMPanel, '[Info]', MMessage , MSource, PrimDoc.DM_FileName, 'WorkspaceManager:View', 'CrossProbeConnective=' + IntToStr(MMObjAddr), IMG_Component);
+            libM_AddMessage('[Info]', MMessage , MSource, PrimDoc.DM_FileName, 'WorkspaceManager:View', 'CrossProbeConnective=' + IntToStr(MMObjAddr), IMG_Component);
         end;
 
         PrjReport.Add('');
@@ -315,6 +233,9 @@ Begin
 
              // old way to get PCB footprint
                 PCBComp := FindPCBComponent(Comp);
+
+//                PCBComp.SourceCompDesignItemID;
+//                PCBComp.SourceLibReference;
 
 // report the project mapping source sch to target pcb
 // Matched Source & Target have the same index
@@ -442,6 +363,93 @@ Begin
     end;
 End;
 
+{-----------------------------------------------------------------------------------------}
+function FindParameterValue(Comp : IComponent, PName : WideString) : WideString;
+var
+    I       : integer;
+    Param   : IParameter;
+    bFound  : boolean;
+
+begin
+    Result := '';
+    I := 0;
+    bFound := false;
+
+    while (not bFound) and (I < (Comp.DM_ParameterCount) ) do
+    begin
+        Param := Comp.DM_Parameters(I);
+        if SameString(Param.DM_Name, PName, False) then
+        begin
+            bFound := true;
+            Result := Param.DM_Value;
+        end;
+        Inc(I);
+    end;
+end;
+
+function FindPCBComponent(Comp : IComponent) : IPCB_Component;
+var
+    PCBComp        : IPCB_Component;
+    Iterator       : IPCB_BoardIterator;
+    bFound         : boolean;
+begin
+    Result := nil;
+    If Board = Nil Then Exit;
+
+    Iterator := Board.BoardIterator_Create;
+    Iterator.AddFilter_ObjectSet(MkSet(eComponentObject));
+    Iterator.AddFilter_LayerSet(MkSet(eTopLayer,eBottomLayer));
+    Iterator.AddFilter_Method(eProcessAll);
+
+    bFound := false;
+
+    PCBComp := Iterator.FirstPCBObject;
+
+    while (not bFound) and (PCBComp <> Nil) Do
+    begin
+        if Comp.DM_UniqueId = PCBComp.SourceUniqueID then
+        begin
+            Result := PCBComp;
+            bFound := true;
+        end;
+        PCBComp := Iterator.NextPCBObject;
+    End;
+    Board.BoardIterator_Destroy(Iterator);
+end;
+
+{ some of SchDoc/Prj component parameters are not same in PCb footprint comp }
+function CheckIgnoreParameter(PName : WideString) : boolean;
+begin
+    Result := false;
+    PName := Trim(PName);
+    case PName of
+    'Component Kind'    :
+        Result := true;
+    'Component Type'    :
+        Result := true;
+    'Description'       :
+        Result := true;
+//    'Designator'        :
+//        Result := false;    // true;
+    'Footprint'         :
+        Result := true;
+    'Library Name'      :
+        Result := true;
+    'Library Reference' :
+        Result := true;
+    'Pin Count'         :
+        Result := true;
+    'PCB3D'             :
+        Result := true;
+    'Ibis Model'        :
+        Result := true;
+    'Signal Integrity'  :
+        Result := true;
+    'Simulation'        :
+        Result := true;
+    end;
+end;
+
 // see Project/OutJob-Script/SimpleOJScript.pas.
 
 //      first 7 parameters are system NOT user..
@@ -453,9 +461,6 @@ End;
 //            'Library Reference'
 //            'Pin Count'
 //            'Ibis Model'
-
-
-
 
 {..............................................................................}
 // Function DM_UnmatchedSourceComponent(Index : Integer) : IComponent;  Returns the indexed unmatched source component, that is, a target component could not be found to map to this source component. Use the DM_UnmatchedSourceComponentCount function.
