@@ -4,11 +4,12 @@ Script checks the Altium version & picks a suitable MaxMechLayers count (1 to n)
 
 Only report used/active layers after mech layer 16.
 AD17/18 ignores mech layers above 32. 
-New AD19 Component Layers are a mech layer Pair with Kind
+New AD19 Component Layers are a mech layer Pair with LayerKind & LayerPairKind
 
 Can use same .ini file between AD19 & AD17. Layer Kinds will be missing & Component Layers (pair)
  become mech layer pairs.
 
+Have to edit the .ini file to add PairKinds..
 
 AD17, AD18
 PcbDoc: 32 max mechanical layers.
@@ -18,15 +19,25 @@ Script: 1 - 32 mechanical layers supported (name, enabled, colour, mech pairs)
 Iterating from 1 to 64 mechlayers does NOT cause any problems in AD17!
 
  
-AD19
+AD19, AD20
 PcbDoc: Can be in legacy (AD18) mode or 1024* max mech layers mode.
-        Introduces "Layer Kind" type to mech & component (pair) layers
+        Introduces "Layer Kind" type to mech & component (pair) layers & PairKinds
+        Can convert Mech Layers back to legacy (removes Kinds & Pair Kinds) 
 
 Script: legacy mode same as AD17/AD18
 Script: 1024* mode appears to work same as legacy.
-
+Script: Can Import LayerKinds & LayerPairKinds
+        Can Export LayerKinds.
 
 API Issues:
 There is no support in LayerStack interface for LayerClass = eLayerClass_Mechanical, just empty..
-Enumerations & built-in string converions of new Mech Layer Kinds is missing.
+Enumerations & built-in string converions of new Mech Layer & Pair Kinds is missing.
+
+API broken? because no wrapper function to handle TMechanicalLayerPair record.
+ LayerPair[I : Integer] property defines indexed layer pairs and returns a TMechanicalLayerPair record of two PCB layers.
+
+  TMechanicalLayerPair = Record          // TCoordPoint/Rect are record; TPoint.x works.  TCoordRect.x1 works
+    Layer1 : TLayer;                     // TMechanicalLayerPair.Layer1 does NOT.
+    Layer2 : TLayer;
+  End;
 

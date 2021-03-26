@@ -25,6 +25,7 @@
  27/05/2020 0.52  Pastemask has a (hidden) thickness. Add thickness total
  28/05/2020 0.53  Don't sum soldermask thickness twice (dielectric & mask)
  01/07/2020 0.54  convert version major to int value to test.
+ 04/12/2020 0.55  add short & mid & long layer names & layerobj objectaddress
 
          tbd :  Use Layer Classes test in AD17 & AD19
 
@@ -113,10 +114,13 @@ var
    DieMatl     : WideString;
    DieConst    : WideString;
    LColour     : WideString;
-   LName       : WideString;
+   ShortLName  : WideString;
+   MidLName    : WideString;
+   LongLName   : WideString;
    IsDisplayed : boolean;
    LegacyMLS   : boolean;
    TotThick    : TCoord;
+   LAddress    : integer;
 
 begin
     Board := PCBServer.GetCurrentPCBBoard;
@@ -150,12 +154,12 @@ begin
         TempS.Add('');
         TempS.Add('eLayerClass ' + IntToStr(LayerClass) + '  ' + LayerClassName(LayerClass));
         if (LayerClass = eLayerClass_Dielectric) or (LayerClass = eLayerClass_SolderMask) then
-            TempS.Add('lc.i : |   name           short name       IsDisplayed? Colour     V7_LayerID Used? Dielectric : Type    Matl    Thickness  Const ')
+            TempS.Add('lc.i : |    LO name         short mid            long        IsDisplayed? Colour     V7_LayerID Used? Dielectric : Type    Matl    Thickness  Const ')
         else if (LayerClass = eLayerClass_Electrical) or (LayerClass = eLayerClass_Signal)
                  or (LayerClass = eLayerClass_PasteMask) then
-            TempS.Add('lc.i : |   name           short name       IsDisplayed? Colour     V7_LayerID Used?                              Thickness (Cu)')
+            TempS.Add('lc.i : |    LO name         short mid            long        IsDisplayed? Colour     V7_LayerID Used?                              Thickness (Cu)')
         else
-            TempS.Add('lc.i : |   name           short name       IsDisplayed? Colour     V7_LayerID Used? ');
+            TempS.Add('lc.i : |    LO name         short mid            long        IsDisplayed? Colour     V7_LayerID Used? ');
 
         i := 1;
         LayerObj := LayerStack.First(LayerClass);
@@ -171,6 +175,7 @@ begin
             Layer := LayerObj.V7_LayerID.ID;
 
             LayerObj.IsInLayerStack;       // check always true.
+            LAddress := LayerObj.I_ObjectAddress;
 
             LayerPos  := '';
             Thickness := '';
@@ -180,6 +185,7 @@ begin
 
             if (LayerClass = eLayerClass_Electrical)then
             begin
+
                Copper    := LayerObj;
                Thickness := CoordUnitToString(Copper.CopperThickness, eMetric);
                TotThick := TotThick + Copper.CopperThickness;
@@ -214,15 +220,19 @@ begin
                 Thickness := CoordUnitToString(LayerObj.CopperThickness, eMetric);
             end;
 
-            LName := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Short) ; // TLayernameDisplayMode: eLayerNameDisplay_Long/Short/Medium
+            ShortLName := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Short); // TLayernameDisplayMode: eLayerNameDisplay_Short/Medium
+            MidLName   := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Medium);
+            LongLName  := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Long) ; // TLayernameDisplayMode: eLayerNameDisplay_Long
+
             IsDisplayed := Board.LayerIsDisplayed(Layer);
            // ColorToString(Board.LayerColor(Layer]));   // TV6_Layer
             LColour := ColorToString(PCBSysOpts.LayerColors(Layer));
 
             TempS.Add(Padright(IntToStr(LayerClass) + '.' + IntToStr(i),6) + ' | ' + Padright(LayerPos,3) + ' ' + PadRight(LayerObj.Name, 15)
-                      + PadRight(LName, 20) + '  ' + PadRight(BoolToStr(IsDisplayed,true), 6) + '  ' + PadRight(LColour, 12)
+                      + PadRight(ShortLName, 5) + ' ' + PadRight(MidLName, 12) + '  ' + PadRight(LongLName, 15)
+                      + '  ' + PadRight(BoolToStr(IsDisplayed,true), 6) + '  ' + PadRight(LColour, 12)
                       + PadLeft(IntToStr(Layer), 9) + ' ' + PadRight(BoolToStr(LayerObj.UsedByPrims, true), 6)
-                      + PadRight(DieType, 15) + PadRight(DieMatl, 15) + PadRight(Thickness, 10) + DieConst );
+                      + PadRight(DieType, 15) + PadRight(DieMatl, 15) + PadRight(Thickness, 10) + DieConst + '  LP: ' + IntToStr(LAddress) );
 
             LayerObj := LayerStack.Next(Layerclass, LayerObj);
             Inc(i);
@@ -245,7 +255,7 @@ begin
 // Old? Methods for Mechanical Layers.
 
     LayerStack := Board.LayerStack_V7;
-    TempS.Add('Calc LayerID   boardlayername       layername            kind  V7_LayerID  UsedByPrims ');
+    TempS.Add('Calc LayerID   boardlayername       layername           short mid            long         kind  V7_LayerID  UsedByPrims ');
     for i := 1 to 64 do
     begin
         ML1 := LayerUtils.MechanicalLayer(i);
@@ -255,8 +265,12 @@ begin
 
         if LayerObj <> Nil then                     // 2 different indices for the same object info, Fg Madness!!!
         begin
-            LayerName := LayerObj.Name;
-            if not LegacyMLS then MechLayerKind := LayerObj.Kind;
+            LayerName  := LayerObj.Name;
+            ShortLName := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Short); // TLayernameDisplayMode: eLayerNameDisplay_Short/Medium
+            MidLName   := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Medium);
+            LongLName  := LayerObj.GetState_LayerDisplayName(eLayerNameDisplay_Long);
+
+          if not LegacyMLS then MechLayerKind := LayerObj.Kind;
 
 //            Layer := i + MinMechanicalLayer - 1;        // just calcs same as above until eMech16.
 //   needs wrapper function  __TV7_Layer_Wrapper()
@@ -271,7 +285,8 @@ begin
         end;
 
         TempS.Add(PadRight(IntToStr(i), 3) + ' ' + PadRight(IntToStr(ML1), 10) + ' ' + PadRight(Board.LayerName(ML1), 20)
-                  + ' ' + PadRight(LayerName, 20) + ' ' + PadRight(IntToStr(MechLayerKind), 3) + ' ' + PadLeft(IntToStr(Layer), 8)
+                  + ' ' + PadRight(LayerName, 20) + PadRight(ShortLName, 5) + ' ' + PadRight(MidLName, 12) + '  ' + PadRight(LongLName, 15)
+                  + ' ' + PadRight(IntToStr(MechLayerKind), 3) + ' ' + PadLeft(IntToStr(Layer), 8)
                   + '   ' + BoolToStr(LayerObj.UsedByPrims, true) );
     end;
 

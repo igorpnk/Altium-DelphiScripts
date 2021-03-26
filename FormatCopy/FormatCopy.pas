@@ -44,11 +44,13 @@ Usage Notes:
 17/10/2019 v0.84 SCH: Refactor out more nested Inset MkSet around line 600 in just in case.
 18/02/2020 v0.85 PCB: Improve Pad & Via expansion rule & value copying
 07/05/2020 v0.86 SCH: Graphically.Invalidate after each copy; trigger bounding box resize for components; fix bug in Comp desc.
-07/05/2020 v0.87 SCH: simplied pick ranking/weighting.
+07/05/2020 v0.87 SCH: simplified pick ranking/weighting.
+26/12/2020 v0.88 PCB: remove 2 useless lines in Dimensions. Change MessageDlg to mtCustom. Does it beep?
 
 
 tbd: <shift> modifier key was intended to prevent font size change but FontManager is borked in AD19.
      special SchLib filters disabled.
+     implement ranking/weighting for PCB obj pick.
 }
 { Current API enumerations:  (in sad need of work)
   AllLayer = [MinLayer..eConnectLayer] , Set of TLayer
@@ -103,6 +105,7 @@ var
 //    Area      : double;
     LayerSet      : TLayerSet;
     TV6_LayerSet  : TLayerSet;
+    PCB_LayerSet  : IPCB_LayerSet;
     RealAllLayers : boolean;
     CLayer        : TLayer;
     SPLayer       : TLayer;
@@ -149,9 +152,11 @@ begin
 // try a bit harder, above call does not handle above emech16
         if Result = eNoObject then
         begin
+            PCB_LayerSet := LayerSetUtils.EmptySet;
+            PCB_LayerSet.IncludeAllLayers;
             Iterator := Board.BoardIterator_Create;
             Iterator.SetState_FilterAll;
-            Iterator.AddFilter_AllLayers;
+            Iterator.AddFilter_IPCB_LayerSet(PCB_LayerSet);
             Iterator.AddFilter_ObjectSet(ObjectSet);
 //            Iterator.AddFilter_Area (x - 100, y + 100, x + 100, y - 100);   // 1 Coord == 10Kmils   published method does not work board iterator
 
@@ -512,6 +517,7 @@ var
    SchSourcePrim   : ISch_Object;
    SchDestinPrim   : ISch_Object;
    SchTempPrim     : ISch_Object;
+   PrimID          : TObjectId;
    HitTest         : ISch_HitTest;
    HitTestMode     : THitTestMode;
    TempSet         : TObjectset;
@@ -521,12 +527,16 @@ var
    bRepeat         : boolean;
    iWeight         : integer;
    iBestWeight     : integer;
+   bCycleSPrim     : boolean;
 
 begin
     // Get the focused (loaded & open)document; Server must already be running
     SchDoc := SchServer.GetCurrentSchDocument;
     if SchDoc = nil then exit;
 
+//    ResetParameters;
+//    AddStringParameter('Action', 'AllOpenDocuments');
+//    RunProcess('Sch:DeSelect');
     Client.SendMessage('SCH:DeSelect', 'Action=AllOpenDocuments', 255, Client.CurrentView);
 
     Location := TLocation;
@@ -627,7 +637,12 @@ begin
 
             HitTestMode := eHitTest_AllObjects;                     // eHitTest_OnlyAccessible
             HitTest := SchDoc.CreateHitTest(HitTestMode,Location);
-
+{            if ShiftKeyDown then
+            begin
+//             cursor := HitTestResultToCursor(eHitTest_NoAction);   // eHitTest_CopyPaste : THitTestResult
+                    SchDoc.PopupMenuHitTest := HitTest;          // last UI obj selected ??
+            end;
+}
             if HitTest <> Nil then
             begin
                 iBestWeight := 0;
@@ -901,9 +916,6 @@ begin
     // Dimensions
     eDimensionObject :
         Begin
-            DestinPrim.PrimitiveLock;
-            DestinPrim.AllowGlobalEdit;
-
             DestinPrim.ArrowLength         := SourcePrim.ArrowLength;
             DestinPrim.ArrowLineWidth      := SourcePrim.ArrowLineWidth;
             DestinPrim.ArrowSize           := SourcePrim.ArrowSize;
@@ -1066,7 +1078,7 @@ begin
                     else
                         Prompt := SourcePrim.ObjectIdString + '. Copy layer ' + Board.LayerName(SourcePrim.Layer) + ' info ?  ';
 
-                    boolLoc := MessageDlg(Prompt, mtConfirmation, mbYesNoCancel, 0);
+                    boolLoc := MessageDlg(Prompt, mtCustom, mbYesNoCancel, 0);
                     if boolLoc = mrCancel then SourcePrim := Nil;
                     bFirstTime := false;
                 end;

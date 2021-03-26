@@ -1,6 +1,6 @@
 {.............................................................................
   CountSymbolPins.pas
-  SchLib
+  SchLib & SchDoc
   Count pins of all parts of Symbols
   Report part cnt & pin xy & len
 
@@ -10,8 +10,8 @@
 
  Version 1.0
  BL Miller
-17/04/2020 v1.10  added pin x, y & len
-
+17/04/2020  v1.10  added pin x, y & len
+04/03/2021  v1.20  added all parts & modes & support SchDoc
 ..............................................................................}
 
 const
@@ -56,7 +56,7 @@ Const
 
 Var
     CurrentLib      : ISch_Lib;
-    LibraryIterator : ISch_Iterator;
+    LibIterator     : ISch_Iterator;
     Iterator        : ISch_Iterator;
     Units           : TUnits;
     UnitsSys        : TUnitSystem;
@@ -66,99 +66,113 @@ Var
     Item            : ISch_Line;
     OldItem         : ISch_Line;
     Pin             : ISch_Pin;
-    S               : TDynamicString;
     ReportInfo      : TStringList;
     CompName        : TString;
     PinCount        : Integer;
 
     PartCount       : Integer;    // sub parts (multi-gate) of 1 component
+    DMCount         : integer;
     PrevPID         : Integer;
     ThisPID         : Integer;
+    ThisDMode       : TDisplayMode;
 
     LocX, LocY      : TCoord;
-    PDes            : TCoord;
-    PLength         :  TCoord;
+    PDes            : WideString;
+    PName           : WideString;
+    PLength         : TCoord;
 
 Begin
     If SchServer = Nil Then Exit;
     CurrentLib := SchServer.GetCurrentSchDocument;
     If CurrentLib = Nil Then Exit;
 
-    If CurrentLib.ObjectID <> eSchLib Then
+    If (CurrentLib.ObjectID <> eSchLib) and (CurrentLib.ObjectID <> eSheet) Then
     Begin
-         ShowError('Please open a schematic library.');
+         ShowError('Please open a schematic doc or library.');
          Exit;
     End;
-
 
     Units    := GetCurrentDocumentUnit;
     UnitsSys := GetCurrentDocumentUnitSystem;
     ReportInfo := TStringList.Create;
 
-    LibraryIterator := CurrentLib.SchLibIterator_Create;
-    LibraryIterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+    if CurrentLib.ObjectID = eSchLib Then
+        LibIterator := CurrentLib.SchLibIterator_Create
+    else
+        LibIterator := CurrentLib.SchIterator_Create;
 
-    Try
+    LibIterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+
         // find the aliases for the current library component.
-        LibComp := LibraryIterator.FirstSchObject;
-        While LibComp <> Nil Do
-        Begin
-            CompName : = LibComp.LibReference;
-            ReportInfo.Add('Comp Name: ' + CompName + ' ' + LibComp.Designator.Text);
-            PartCount := LibComp.PartCount;
-            ReportInfo.Add('Number parts : ' + IntToStr(PartCount));
+    LibComp := LibIterator.FirstSchObject;
+    While LibComp <> Nil Do
+    Begin
+        CompName : = LibComp.LibReference;
+        ReportInfo.Add('Comp Name: ' + CompName + '   | Des : ' + LibComp.Designator.Text);
+        PartCount := LibComp.PartCount;
 
-            Iterator := LibComp.SchIterator_Create;
-            Iterator.AddFilter_ObjectSet(MkSet(ePin));
-            ReportInfo.Add('PartID : ' + IntToStr(LibComp.CurrentPartID));
+        LibComp.GetState_PartCountNoPart0;
+
+        ThisPID   := LibComp.CurrentPartID;
+        ThisDMode := LibComp.DisplayMode;
+        DMCount   := LibComp.DisplayModeCount;
+        ReportInfo.Add('Number parts : ' + IntToStr(PartCount) + ' |  CurrentPartID : ' + IntToStr(ThisPID) + ' |  modes cruft : ' + IntToStr(DMCount)  + ' |  Current Mode : ' + IntToStr(ThisDMode));
+
+
+        Iterator := LibComp.SchIterator_Create;
+        Iterator.AddFilter_ObjectSet(MkSet(ePin));
+
+// Part0 is some global power pin graphic nonsense
+        for i := 1 to (PartCount) do
+        begin
+            ReportInfo.Add('PartID : ' + IntToStr(i) );
+            ReportInfo.Add('Pin Name  Mode     X        Y         length ');
+
             PinCount := 0;
-            ThisPID   := LibComp.CurrentPartID;
 
-            Try
-                Item := Iterator.FirstSchObject;
-                While Item <> Nil Do
-                Begin
-                    PrevPID := ThisPID;
-                    ThisPID := Item.OwnerPartId;
-                    // check if into a new part of the component.
-                    If ThisPID <> PrevPID Then
-                    Begin
-                        ReportInfo.Add('PartID : ' + IntToStr(PrevPID) + ' Pin Count : ' + IntToStr(PinCount));
-                   //     PinCount := 0;
-                    End;
+            Item := Iterator.FirstSchObject;
+            while Item <> Nil Do
+            begin
+                ThisDMode :=Item.OwnerPartDisplayMode;
+                ThisPID := Item.OwnerPartId;
+
+                if i = ThisPID then
+                begin
 
                     If Item.ObjectID = ePin Then
                     Begin
                         Pin := Item;
                         PDes    := Pin.Designator;
+                        PName   := Pin.Name;
                         PLength := Pin.PinLength;
                         LocX    := Pin.Location.X;
                         LocY    := Pin.Location.Y;
 // CoordUnitToStringNoUnit(L1.x, Units)
 
-                        ReportInfo.Add('Pin ' + PDes + ' X : ' + CoordUnitToStringWithAccuracy(LocX, Units, 5, 10)  + '   Y : ' + CoordUnitToStringwithAccuracy(LocY, Units, 5, 10)  + '   len : '+ CoordUnitToStringWithAccuracy(PLength, Units, 5, 10));
+                        ReportInfo.Add(PadRight(PDes,4) + PadRight(PName,6) + PadRight(IntToStr(ThisDMode),2) + '   ' + CoordUnitToStringWithAccuracy(LocX, Units, 5, 10) + '   '  + CoordUnitToStringwithAccuracy(LocY, Units, 5, 10)  + '  '+ CoordUnitToStringWithAccuracy(PLength, Units, 5, 10));
                         Inc(PinCount);
-                    End;
-
-                    Item := Iterator.NextSchObject;
+                    end;
                 End;
-            Finally
-                LibComp.SchIterator_Destroy(Iterator);
-            End;
-            
-            // from SchParameters.pas
-//            if bAddParameter then SchParameterSet( LibComp, SymbolPinCount, IntToStr(PinCount) );
+                Item := Iterator.NextSchObject;
 
-            ReportInfo.Add('');
-            LibComp := LibraryIterator.NextSchObject;
-        End;
+            end;
+            ReportInfo.Add(' Pin Count : ' + IntToStr(PinCount));
+        end;
 
-    Finally
-        CurrentLib.GraphicallyInvalidate;
-        CurrentLib.OwnerDocument.UpdateDisplayForCurrentSheet;
-        // we are finished fetching symbols of the current library.
-        CurrentLib.SchIterator_Destroy(LibraryIterator);
+        LibComp.SchIterator_Destroy(Iterator);
+        ReportInfo.Add('');
+        LibComp := LibIterator.NextSchObject;
     End;
+
+ 
+    If CurrentLib.ObjectID = eSchLib Then
+        // CurrentLib.SchLibIterator_Destroy(Iterator)
+        CurrentLib.SchIterator_Destroy(Iterator)
+    Else
+        CurrentLib.SchIterator_Destroy(Iterator);
+
+    CurrentLib.GraphicallyInvalidate;
+    CurrentLib.OwnerDocument.UpdateDisplayForCurrentSheet;
 
 
     ReportInfo.Insert(0,'SchLib Part Pin Count Report');
